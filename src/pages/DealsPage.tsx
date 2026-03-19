@@ -1,28 +1,85 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ColumnDef } from '@tanstack/react-table';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { StatusBadge } from '@/components/shared/StatusBadge';
-import { deals, getUserById } from '@/data/mock-data';
-import { DealStatus, DEAL_STATUS_CONFIG } from '@/types';
+import { DataTable } from '@/components/shared/DataTable';
+import { useDeals } from '@/hooks/use-deals';
+import { DealWithReps } from '@/services/deals.service';
+import { DEAL_STATUS_CONFIG } from '@/types';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Search, Plus, Filter } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export default function DealsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const navigate = useNavigate();
 
-  const filtered = deals.filter(d => {
-    const matchSearch = d.propertyAddress.toLowerCase().includes(search.toLowerCase()) ||
-      d.sellerName.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'all' || d.status === statusFilter;
-    return matchSearch && matchStatus;
+  const { data: deals, isLoading } = useDeals({
+    search: search || undefined,
+    status: statusFilter as any,
   });
+
+  const columns = useMemo<ColumnDef<DealWithReps, any>[]>(
+    () => [
+      {
+        accessorKey: 'propertyAddress',
+        header: 'Property',
+        cell: ({ row }) => (
+          <div>
+            <Link to={`/deals/${row.original.id}`} className="font-medium text-foreground hover:text-primary transition-colors">
+              {row.original.propertyAddress}
+            </Link>
+            <p className="text-xs text-muted-foreground md:hidden mt-0.5">{row.original.sellerName}</p>
+          </div>
+        ),
+      },
+      {
+        accessorKey: 'sellerName',
+        header: 'Seller',
+        meta: { className: 'hidden md:table-cell' },
+        cell: ({ getValue }) => <span className="text-muted-foreground">{getValue() as string}</span>,
+      },
+      {
+        accessorKey: 'acquisitionsRepName',
+        header: 'Acq Rep',
+        meta: { className: 'hidden lg:table-cell' },
+      },
+      {
+        accessorKey: 'status',
+        header: 'Status',
+        cell: ({ getValue }) => <StatusBadge status={getValue() as any} />,
+        enableSorting: true,
+      },
+      {
+        accessorKey: 'contractPrice',
+        header: 'Contract',
+        meta: { align: 'right', className: 'hidden sm:table-cell' },
+        cell: ({ getValue }) => `$${(getValue() as number).toLocaleString()}`,
+      },
+      {
+        accessorKey: 'assignmentFee',
+        header: 'Fee',
+        meta: { align: 'right' },
+        cell: ({ getValue }) => {
+          const fee = getValue() as number | null;
+          return fee ? (
+            <span className="font-medium text-success">${fee.toLocaleString()}</span>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          );
+        },
+      },
+    ],
+    []
+  );
 
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto">
-      <PageHeader title="Deals" description={`${deals.length} total deals in pipeline`}>
+      <PageHeader title="Deals" description={`${deals?.length ?? 0} deals in pipeline`}>
         <Button size="sm" className="gap-2">
           <Plus className="h-4 w-4" /> New Deal
         </Button>
@@ -48,45 +105,16 @@ export default function DealsPage() {
         </Select>
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border bg-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/30">
-                <th className="text-left py-3 px-4 font-medium text-muted-foreground">Property</th>
-                <th className="text-left py-3 px-4 font-medium text-muted-foreground hidden md:table-cell">Seller</th>
-                <th className="text-left py-3 px-4 font-medium text-muted-foreground hidden lg:table-cell">Acq Rep</th>
-                <th className="text-left py-3 px-4 font-medium text-muted-foreground">Status</th>
-                <th className="text-right py-3 px-4 font-medium text-muted-foreground hidden sm:table-cell">Contract</th>
-                <th className="text-right py-3 px-4 font-medium text-muted-foreground">Fee</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(deal => (
-                <tr key={deal.id} className="border-b last:border-b-0 hover:bg-muted/30 transition-colors">
-                  <td className="py-3 px-4">
-                    <Link to={`/deals/${deal.id}`} className="font-medium text-foreground hover:text-primary transition-colors">
-                      {deal.propertyAddress}
-                    </Link>
-                    <p className="text-xs text-muted-foreground md:hidden mt-0.5">{deal.sellerName}</p>
-                  </td>
-                  <td className="py-3 px-4 text-muted-foreground hidden md:table-cell">{deal.sellerName}</td>
-                  <td className="py-3 px-4 hidden lg:table-cell">{getUserById(deal.acquisitionsRepId)?.name}</td>
-                  <td className="py-3 px-4"><StatusBadge status={deal.status} /></td>
-                  <td className="py-3 px-4 text-right hidden sm:table-cell">${deal.contractPrice.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right font-medium">
-                    {deal.assignmentFee ? <span className="text-success">${deal.assignmentFee.toLocaleString()}</span> : <span className="text-muted-foreground">—</span>}
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={6} className="py-12 text-center text-muted-foreground">No deals found</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {isLoading ? (
+        <Skeleton className="h-96 rounded-lg" />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={deals ?? []}
+          emptyMessage="No deals found"
+          onRowClick={row => navigate(`/deals/${row.id}`)}
+        />
+      )}
     </div>
   );
 }
