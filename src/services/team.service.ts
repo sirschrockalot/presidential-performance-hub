@@ -1,3 +1,7 @@
+/**
+ * Team Service — SWAP POINT
+ * Replace mock imports below with Prisma queries or API fetch calls.
+ */
 import { User, UserRole, Team } from '@/types';
 import { users as mockUsers, getUserPoints, getRepDrawBalance } from '@/data/mock-data';
 

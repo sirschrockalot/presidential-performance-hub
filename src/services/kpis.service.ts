@@ -1,3 +1,8 @@
+/**
+ * KPIs Service — SWAP POINT
+ * Replace mock imports below with Prisma queries or API fetch calls.
+ * KPI entries are per-rep, per-week, per-team.
+ */
 import { KpiEntry, Team } from '@/types';
 import { kpiEntries as mockKpiEntries, getUserById } from '@/data/mock-data';
 
