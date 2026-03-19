@@ -1,0 +1,423 @@
+// Presidential Digs Performance Hub — PostgreSQL schema
+//
+// npm run prisma:generate   — generate client
+// npm run prisma:migrate    — dev migrations
+// npm run prisma:seed       — sample data (see prisma/seed/)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Business team (Acquisitions / Dispositions / Operations).
+enum TeamCode {
+  ACQUISITIONS
+  DISPOSITIONS
+  OPERATIONS
+}
+
+/// Canonical role codes; seeded rows in `Role` reference these.
+enum UserRoleCode {
+  ADMIN
+  ACQUISITIONS_MANAGER
+  DISPOSITIONS_MANAGER
+  TRANSACTION_COORDINATOR
+  REP
+}
+
+enum DealStatus {
+  LEAD
+  UNDER_CONTRACT
+  MARKETED
+  BUYER_COMMITTED
+  EMD_RECEIVED
+  ASSIGNED
+  CLOSED_FUNDED
+  CANCELED
+}
+
+enum DrawStatus {
+  PENDING
+  APPROVED
+  PAID
+  RECOUPED
+  DENIED
+}
+
+/// How a point ledger line was created (auto from funded deal vs manual adjustment pipeline).
+enum PointEventKind {
+  AUTO_FUNDED_DEAL
+  MANUAL_ADJUSTMENT
+  /// Reserved for future corrections (e.g. clawback) — business rules TBD
+  CORRECTION
+}
+
+enum ReportingPeriodKind {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+// ---------------------------------------------------------------------------
+// Identity & org
+// ---------------------------------------------------------------------------
+
+/// Role entity for RBAC display and future permission expansion.
+/// Seed one row per `UserRoleCode`.
+model Role {
+  id          String       @id @default(cuid())
+  code        UserRoleCode @unique
+  displayName String
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  users User[]
+}
+
+/// Team entity (lookup).
+model Team {
+  id        String    @id @default(cuid())
+  code      TeamCode  @unique
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  users     User[]
+  kpiEntries KpiEntry[]
+  kpiTargets KpiTarget[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  active    Boolean  @default(true)
+  avatarUrl String?
+  /// bcrypt hash for Credentials provider (null = invite-only / SSO later)
+  passwordHash String?
+  /// Bridges seeded users to legacy mock fixture ids (e.g. "u5") until API reads DB only
+  mockScopeId  String? @unique
+  joinedAt  DateTime @default(now())
+
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Deals (assignments)
+  dealsAsAcqRep      Deal[] @relation("DealAcquisitionsRep")
+  dealsAsDispoRep    Deal[] @relation("DealDispoRep")
+  dealsAsTc          Deal[] @relation("DealTransactionCoordinator")
+
+  kpiEntries         KpiEntry[]
+  drawsAsRep         Draw[]
+  drawsApproved      Draw[]           @relation("DrawApprovedBy")
+  pointEventsReceived PointEvent[]    @relation("PointEventRecipient")
+  pointEventsCreated  PointEvent[]    @relation("PointEventCreatedBy")
+  pointAdjustmentsCreated PointAdjustment[] @relation("PointAdjustmentApprover")
+  pointAdjustmentsForUser PointAdjustment[] @relation("PointAdjustmentRecipient")
+  dealStatusChanges  DealStatusHistory[]
+  dealNotes          DealNote[]
+  auditLogs          AuditLog[]       @relation("AuditLogActor")
+}
+
+// ---------------------------------------------------------------------------
+// Deals (source of truth for draws & funded-deal points)
+// ---------------------------------------------------------------------------
+
+model Deal {
+  id String @id @default(cuid())
+
+  propertyAddress String
+  sellerName      String
+  buyerName       String?
+
+  acquisitionsRepId String
+  acquisitionsRep   User   @relation("DealAcquisitionsRep", fields: [acquisitionsRepId], references: [id], onDelete: Restrict)
+
+  dispoRepId String?
+  dispoRep   User?   @relation("DealDispoRep", fields: [dispoRepId], references: [id], onDelete: SetNull)
+
+  transactionCoordinatorId String?
+  transactionCoordinator   User?   @relation("DealTransactionCoordinator", fields: [transactionCoordinatorId], references: [id], onDelete: SetNull)
+
+  contractDate       DateTime  @db.Date
+  assignedDate       DateTime? @db.Date
+  closedFundedDate   DateTime? @db.Date
+  inspectionEndDate  DateTime? @db.Date
+
+  contractPrice   Decimal  @db.Decimal(14, 2)
+  assignmentPrice Decimal? @db.Decimal(14, 2)
+  /// Assignment fee / spread — drives point tier rules when funded
+  assignmentFee   Decimal? @db.Decimal(14, 2)
+
+  buyerEmdAmount   Decimal? @db.Decimal(14, 2)
+  buyerEmdReceived Boolean  @default(false)
+
+  titleCompany String
+  status       DealStatus @default(LEAD)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  statusHistory   DealStatusHistory[]
+  draws           Draw[]
+  pointEvents     PointEvent[]
+  pointAdjustments PointAdjustment[]
+  notes           DealNote[]
+
+  @@index([status])
+  @@index([acquisitionsRepId])
+  @@index([dispoRepId])
+  @@index([closedFundedDate])
+}
+
+/// Immutable audit trail of deal status transitions.
+model DealStatusHistory {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  fromStatus DealStatus?
+  toStatus   DealStatus
+
+  changedByUserId String
+  changedBy       User     @relation(fields: [changedByUserId], references: [id], onDelete: Restrict)
+
+  note      String?
+  changedAt DateTime @default(now())
+
+  @@index([dealId, changedAt])
+}
+
+/// User-authored notes on a deal (replaces a single `notes` blob on Deal for auditability).
+model DealNote {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  authorUserId String
+  author       User   @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  body String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dealId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// KPIs
+// ---------------------------------------------------------------------------
+
+model ReportingPeriod {
+  id          String              @id @default(cuid())
+  kind        ReportingPeriodKind
+  /// Inclusive start of period (e.g. Monday of KPI week)
+  periodStart DateTime            @db.Date
+  /// Inclusive end of period
+  periodEnd   DateTime            @db.Date
+  label       String?
+  isLocked    Boolean             @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  kpiEntries KpiEntry[]
+  kpiTargets KpiTarget[]
+
+  @@unique([kind, periodStart])
+  @@index([periodStart, periodEnd])
+}
+
+/// Weekly (or period-scoped) KPI submission per user.
+/// Acq vs Dispo metrics differ — optional fields hold team-specific measures.
+model KpiEntry {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Team context for this entry (typically matches user.team; stored for reporting integrity).
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Restrict)
+
+  reportingPeriodId String
+  reportingPeriod   ReportingPeriod @relation(fields: [reportingPeriodId], references: [id], onDelete: Restrict)
+
+  dials            Int @default(0)
+  talkTimeMinutes  Int @default(0)
+  falloutCount     Int @default(0)
+  revenueFromFunded Decimal @default(0) @db.Decimal(14, 2)
+
+  // Acquisitions-oriented
+  leadsWorked      Int?
+  offersMade       Int?
+  contractsSigned  Int?
+
+  // Dispositions-oriented
+  buyerConversations Int?
+  propertiesMarketed Int?
+  emdsReceived       Int?
+  assignmentsSecured Int?
+  avgAssignmentFee   Decimal? @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, reportingPeriodId])
+  @@index([teamId, reportingPeriodId])
+}
+
+/// Target thresholds (e.g. weekly dials goal) — optional period scope.
+model KpiTarget {
+  id String @id @default(cuid())
+
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  /// When null, treat as ongoing default until superseded
+  reportingPeriodId String?
+  reportingPeriod   ReportingPeriod? @relation(fields: [reportingPeriodId], references: [id], onDelete: SetNull)
+
+  /// Stable key for UI/forms, e.g. "DIALS", "TALK_TIME_MINUTES"
+  metricKey   String
+  targetValue Decimal @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teamId, metricKey])
+  @@index([reportingPeriodId])
+}
+
+// ---------------------------------------------------------------------------
+// Draws (eligibility derived from deal: ASSIGNED + buyerEmdReceived)
+// ---------------------------------------------------------------------------
+
+model Draw {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Restrict)
+
+  repId String
+  rep   User   @relation(fields: [repId], references: [id], onDelete: Restrict)
+
+  amount   Decimal     @db.Decimal(14, 2)
+  status   DrawStatus  @default(PENDING)
+  /// Denormalized flag at time of request/submit for audit; business rules may re-validate
+  eligible Boolean
+
+  dateIssued DateTime? @db.Date
+
+  approvedByUserId String?
+  approvedBy       User?   @relation("DrawApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  notes          String   @default("")
+  amountRecouped Decimal  @default(0) @db.Decimal(14, 2)
+  remainingBalance Decimal @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dealId])
+  @@index([repId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Points ledger
+// ---------------------------------------------------------------------------
+
+/// Admin-initiated adjustment record; typically spawns a `PointEvent` with kind MANUAL_ADJUSTMENT.
+model PointAdjustment {
+  id String @id @default(cuid())
+
+  recipientUserId String
+  recipient       User   @relation("PointAdjustmentRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict)
+
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  points Decimal @db.Decimal(10, 2)
+  reason String  @db.Text
+
+  approvedByUserId String
+  approvedBy       User   @relation("PointAdjustmentApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  pointEvents PointEvent[]
+
+  @@index([recipientUserId])
+  @@index([dealId])
+}
+
+/// Append-only style ledger line (auto from funded deal or manual adjustment).
+model PointEvent {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation("PointEventRecipient", fields: [userId], references: [id], onDelete: Restrict)
+
+  /// Source deal when points stem from a funded deal; optional for non-deal manual lines
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  points Decimal        @db.Decimal(10, 2)
+  kind   PointEventKind
+
+  reason String @db.Text
+
+  pointAdjustmentId String?
+  pointAdjustment   PointAdjustment? @relation(fields: [pointAdjustmentId], references: [id], onDelete: SetNull)
+
+  createdByUserId String?
+  createdBy       User?   @relation("PointEventCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([dealId])
+  @@index([kind])
+}
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  actorUserId String?
+  actor       User?   @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  /// e.g. "deal.update", "draw.approve"
+  action     String
+  entityType String
+  entityId   String
+
+  metadata Json?
+
+  ipAddress  String?
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorUserId, createdAt])
+}

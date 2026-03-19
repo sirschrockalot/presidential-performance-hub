@@ -76,7 +76,7 @@ export interface Draw {
 export interface PointEvent {
   id: string;
   userId: string;
-  dealId: string;
+  dealId: string | null;
   points: number;
   reason: string;
   createdAt: string;

@@ -1,0 +1,4 @@
+// The active Prisma schema lives at the repository root: `prisma/schema.prisma`
+// (required for `npx prisma migrate`, `generate`, etc.)
+//
+// This file is a pointer only — edit `prisma/schema.prisma` instead.
