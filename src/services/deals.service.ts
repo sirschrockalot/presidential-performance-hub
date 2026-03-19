@@ -1,3 +1,8 @@
+/**
+ * Deals Service — SWAP POINT
+ * Replace mock imports below with Prisma queries or API fetch calls.
+ * The hooks in src/hooks/use-deals.ts consume these functions via React Query.
+ */
 import { Deal, DealStatus } from '@/types';
 import { deals as mockDeals, getUserById } from '@/data/mock-data';
 

@@ -1,3 +1,8 @@
+/**
+ * Points Service — SWAP POINT
+ * Replace mock imports below with Prisma queries or API fetch calls.
+ * Points rules: see calculatePoints() in src/types/index.ts
+ */
 import { PointEvent, calculatePoints, calculateTcPoints } from '@/types';
 import { pointEvents as mockPointEvents, getUserById, getUserPoints } from '@/data/mock-data';
 

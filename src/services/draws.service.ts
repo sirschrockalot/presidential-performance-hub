@@ -1,3 +1,8 @@
+/**
+ * Draws Service — SWAP POINT
+ * Replace mock imports below with Prisma queries or API fetch calls.
+ * Business rule: draws only eligible when deal is Assigned + EMD received.
+ */
 import { Draw, DrawStatus } from '@/types';
 import { draws as mockDraws, getUserById, getDealById } from '@/data/mock-data';
 
