@@ -1,24 +1,39 @@
 import { useParams, Link } from 'react-router-dom';
-import { getDealById, getUserById, draws, pointEvents } from '@/data/mock-data';
+import { useDeal } from '@/hooks/use-deals';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { MetricCard } from '@/components/shared/MetricCard';
-import { DEAL_STATUS_CONFIG, DealStatus, calculatePoints, calculateTcPoints } from '@/types';
-import { ArrowLeft, DollarSign, Calendar, User, Building2, FileText } from 'lucide-react';
+import { DEAL_STATUS_CONFIG, DealStatus } from '@/types';
+import { checkDrawEligibility } from '@/services/draws.service';
+import { draws, pointEvents, getUserById } from '@/data/mock-data';
+import { ArrowLeft, DollarSign, Calendar, User, Building2, FileText, ShieldCheck, ShieldX } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const DEAL_STATUSES: DealStatus[] = ['lead', 'under_contract', 'marketed', 'buyer_committed', 'emd_received', 'assigned', 'closed_funded'];
 
 export default function DealDetail() {
   const { id } = useParams();
-  const deal = getDealById(id || '');
+  const { data: deal, isLoading } = useDeal(id || '');
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6 max-w-[1200px] mx-auto">
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-12 w-96" />
+        <Skeleton className="h-20 rounded-lg" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-lg" />)}
+        </div>
+      </div>
+    );
+  }
+
   if (!deal) return <div className="p-12 text-center text-muted-foreground">Deal not found</div>;
 
-  const acqRep = getUserById(deal.acquisitionsRepId);
-  const dispoRep = deal.dispoRepId ? getUserById(deal.dispoRepId) : null;
-  const tc = deal.transactionCoordinatorId ? getUserById(deal.transactionCoordinatorId) : null;
   const dealDraws = draws.filter(d => d.dealId === deal.id);
   const dealPoints = pointEvents.filter(pe => pe.dealId === deal.id);
   const statusIdx = DEAL_STATUSES.indexOf(deal.status);
+  const eligibility = checkDrawEligibility(deal.id);
 
   return (
     <div className="space-y-6 max-w-[1200px] mx-auto">
@@ -31,7 +46,14 @@ export default function DealDetail() {
           <h1 className="text-xl font-bold">{deal.propertyAddress}</h1>
           <p className="text-sm text-muted-foreground mt-1">Seller: {deal.sellerName}</p>
         </div>
-        <StatusBadge status={deal.status} className="text-sm px-3 py-1" />
+        <div className="flex items-center gap-3">
+          {eligibility.eligible ? (
+            <span className="inline-flex items-center gap-1 text-xs text-success"><ShieldCheck className="h-3.5 w-3.5" /> Draw eligible</span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><ShieldX className="h-3.5 w-3.5" /> {eligibility.reason}</span>
+          )}
+          <StatusBadge status={deal.status} className="text-sm px-3 py-1" />
+        </div>
       </div>
 
       {/* Status timeline */}
@@ -73,9 +95,9 @@ export default function DealDetail() {
             <div className="rounded-lg border bg-card p-5 space-y-4">
               <h3 className="text-sm font-semibold flex items-center gap-2"><User className="h-4 w-4" /> Team</h3>
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Acquisitions Rep</span><span className="font-medium">{acqRep?.name || '—'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Dispo Rep</span><span className="font-medium">{dispoRep?.name || '—'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Transaction Coordinator</span><span className="font-medium">{tc?.name || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Acquisitions Rep</span><span className="font-medium">{deal.acquisitionsRepName}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Dispo Rep</span><span className="font-medium">{deal.dispoRepName || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Transaction Coordinator</span><span className="font-medium">{deal.tcName || '—'}</span></div>
               </div>
             </div>
             <div className="rounded-lg border bg-card p-5 space-y-4">

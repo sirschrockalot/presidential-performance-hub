@@ -1,47 +1,45 @@
+import { useMemo } from 'react';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { MetricCard } from '@/components/shared/MetricCard';
 import { StatusBadge } from '@/components/shared/StatusBadge';
-import { deals, users, pointEvents, draws, kpiEntries, getUserById, getUserPoints } from '@/data/mock-data';
+import { useDealMetrics } from '@/hooks/use-deals';
+import { useLeaderboard } from '@/hooks/use-points';
+import { useDrawMetrics } from '@/hooks/use-draws';
+import { deals, getUserById, kpiEntries, users } from '@/data/mock-data';
 import { DollarSign, Handshake, TrendingUp, Banknote, Trophy, Users, BarChart3, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-
-const fundedDeals = deals.filter(d => d.status === 'closed_funded');
-const activeDeals = deals.filter(d => !['closed_funded', 'canceled'].includes(d.status));
-const totalRevenue = fundedDeals.reduce((s, d) => s + (d.assignmentFee || 0), 0);
-const avgFee = fundedDeals.length ? totalRevenue / fundedDeals.length : 0;
-const totalDrawsOutstanding = draws.filter(d => ['paid', 'approved'].includes(d.status)).reduce((s, d) => s + d.remainingBalance, 0);
-const totalPoints = pointEvents.reduce((s, pe) => s + pe.points, 0);
-
-const repIds = ['u5', 'u6', 'u7', 'u8'];
-const leaderboard = repIds.map(id => ({
-  user: getUserById(id)!,
-  points: getUserPoints(id),
-})).sort((a, b) => b.points - a.points);
-
-const statusCounts = [
-  { name: 'Lead', count: deals.filter(d => d.status === 'lead').length },
-  { name: 'Contract', count: deals.filter(d => d.status === 'under_contract').length },
-  { name: 'Marketed', count: deals.filter(d => d.status === 'marketed').length },
-  { name: 'Committed', count: deals.filter(d => d.status === 'buyer_committed').length },
-  { name: 'EMD In', count: deals.filter(d => d.status === 'emd_received').length },
-  { name: 'Assigned', count: deals.filter(d => d.status === 'assigned').length },
-  { name: 'Funded', count: deals.filter(d => d.status === 'closed_funded').length },
-];
+import { Skeleton } from '@/components/ui/skeleton';
 
 const recentDeals = [...deals].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5);
 
 export default function Dashboard() {
+  const { data: metrics } = useDealMetrics();
+  const { data: drawMetrics } = useDrawMetrics();
+  const { data: leaderboard } = useLeaderboard(['u5', 'u6', 'u7', 'u8']);
+  const totalPoints = useMemo(() => leaderboard?.reduce((s, e) => s + e.points, 0) ?? 0, [leaderboard]);
+
+  if (!metrics) {
+    return (
+      <div className="space-y-6 max-w-[1400px] mx-auto">
+        <PageHeader title="Dashboard" description="Executive overview of deals, performance, and financials" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-lg" />)}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto">
       <PageHeader title="Dashboard" description="Executive overview of deals, performance, and financials" />
 
       {/* Metrics row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard title="Active Deals" value={activeDeals.length} icon={Handshake} subtitle="In pipeline" variant="info" />
-        <MetricCard title="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} icon={DollarSign} trend={{ value: 12, label: 'vs last month' }} variant="success" />
-        <MetricCard title="Avg Assignment Fee" value={`$${Math.round(avgFee).toLocaleString()}`} icon={TrendingUp} subtitle={`${fundedDeals.length} funded deals`} />
-        <MetricCard title="Outstanding Draws" value={`$${totalDrawsOutstanding.toLocaleString()}`} icon={Banknote} variant="warning" />
+        <MetricCard title="Active Deals" value={metrics.activeCount} icon={Handshake} subtitle="In pipeline" variant="info" />
+        <MetricCard title="Total Revenue" value={`$${metrics.totalRevenue.toLocaleString()}`} icon={DollarSign} trend={{ value: 12, label: 'vs last month' }} variant="success" />
+        <MetricCard title="Avg Assignment Fee" value={`$${metrics.avgFee.toLocaleString()}`} icon={TrendingUp} subtitle={`${metrics.fundedCount} funded deals`} />
+        <MetricCard title="Outstanding Draws" value={`$${(drawMetrics?.outstanding ?? 0).toLocaleString()}`} icon={Banknote} variant="warning" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -54,7 +52,7 @@ export default function Dashboard() {
             </Link>
           </div>
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={statusCounts} barSize={32}>
+            <BarChart data={metrics.pipelineByStatus} barSize={32}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} allowDecimals={false} />
@@ -75,15 +73,15 @@ export default function Dashboard() {
             </Link>
           </div>
           <div className="space-y-3">
-            {leaderboard.map((entry, i) => (
-              <div key={entry.user.id} className="flex items-center gap-3">
+            {leaderboard?.map((entry, i) => (
+              <div key={entry.userId} className="flex items-center gap-3">
                 <span className="text-xs font-bold text-muted-foreground w-5">{i + 1}</span>
                 <div className="flex items-center justify-center h-8 w-8 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                  {entry.user.name.split(' ').map(n => n[0]).join('')}
+                  {entry.name.split(' ').map(n => n[0]).join('')}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{entry.user.name}</p>
-                  <p className="text-xs text-muted-foreground capitalize">{entry.user.team}</p>
+                  <p className="text-sm font-medium truncate">{entry.name}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{entry.team}</p>
                 </div>
                 <span className="text-sm font-bold">{entry.points} pts</span>
               </div>
