@@ -11,6 +11,9 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  /// Used for migrations / Prisma administrative tasks (e.g. migrate) to bypass pooling layers.
+  /// Set `DATABASE_URL` to the pooled Supabase connection and `DIRECT_URL` to a direct (non-pooled) connection.
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------

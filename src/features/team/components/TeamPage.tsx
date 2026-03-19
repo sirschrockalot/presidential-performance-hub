@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ColumnDef } from '@tanstack/react-table';
+import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from '@/components/shared/PageHeader';
 import { MetricCard } from '@/components/shared/MetricCard';
 import { DataTable } from '@/components/shared/DataTable';
@@ -17,10 +18,69 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuthz } from "@/lib/auth/authz-context";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
+import type { UserRole } from "@/types";
+import { USER_ROLE_CODE_FROM_UI } from "@/domain/prisma-enums";
 
 export default function TeamPage() {
-  const { can } = useAuthz();
+  const { can, roleCode } = useAuthz();
+  const isAdmin = roleCode === "ADMIN";
   const { data: members, isLoading } = useTeamMembers();
+  const qc = useQueryClient();
+
+  const [roleDialogOpen, setRoleDialogOpen] = useState(false);
+  const [roleTargetId, setRoleTargetId] = useState<string | null>(null);
+  const [roleDraft, setRoleDraft] = useState<UserRole>("rep");
+  const [userBusyId, setUserBusyId] = useState<string | null>(null);
+
+  const roleOptions: UserRole[] = ["admin", "acquisitions_manager", "dispositions_manager", "transaction_coordinator", "rep"];
+
+  const toggleUserActive = async (targetUserId: string, nextActive: boolean) => {
+    setUserBusyId(targetUserId);
+    try {
+      const res = await fetch(`/api/team/users/${targetUserId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: nextActive }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? "Failed to update user");
+      }
+      toast.success(nextActive ? "User activated" : "User deactivated");
+      await qc.invalidateQueries({ queryKey: ["team-members"], exact: false });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update user");
+    } finally {
+      setUserBusyId(null);
+    }
+  };
+
+  const saveUserRole = async () => {
+    if (!roleTargetId) return;
+    setUserBusyId(roleTargetId);
+    try {
+      const prismaRoleCode = USER_ROLE_CODE_FROM_UI[roleDraft];
+      const res = await fetch(`/api/team/users/${roleTargetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roleCode: prismaRoleCode }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? "Failed to update role");
+      }
+      toast.success("Role updated");
+      await qc.invalidateQueries({ queryKey: ["team-members"], exact: false });
+      setRoleDialogOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update role");
+    } finally {
+      setUserBusyId(null);
+    }
+  };
 
   const activeCount = members?.filter((m) => m.active).length ?? 0;
   const totalPoints = members?.reduce((s, m) => s + m.points, 0) ?? 0;
@@ -85,7 +145,9 @@ export default function TeamPage() {
       {
         id: 'actions',
         header: '',
-        cell: () => (
+        cell: ({ row }) => {
+          const m = row.original as TeamMember;
+          return (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -94,16 +156,36 @@ export default function TeamPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem>View Profile</DropdownMenuItem>
-              <DropdownMenuItem>Edit Role</DropdownMenuItem>
               <DropdownMenuItem>View Scorecard</DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive">Deactivate</DropdownMenuItem>
+              {isAdmin && (
+                <>
+                  <DropdownMenuItem
+                    disabled={userBusyId === m.id}
+                    className={m.active ? "text-destructive" : undefined}
+                    onClick={() => toggleUserActive(m.id, !m.active)}
+                  >
+                    {m.active ? "Deactivate" : "Activate"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={userBusyId === m.id}
+                    onClick={() => {
+                      setRoleTargetId(m.id);
+                      setRoleDraft(m.role);
+                      setRoleDialogOpen(true);
+                    }}
+                  >
+                    Edit Role
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
-        ),
+          );
+        },
         enableSorting: false,
       },
     ],
-    []
+    [isAdmin, userBusyId, toggleUserActive]
   );
 
   return (
@@ -128,6 +210,39 @@ export default function TeamPage() {
       ) : (
         <DataTable columns={columns} data={members ?? []} emptyMessage="No team members" />
       )}
+
+      <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Role</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">Select the new role for this user.</p>
+            <Select value={roleDraft} onValueChange={(v) => setRoleDraft(v as UserRole)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose role" />
+              </SelectTrigger>
+              <SelectContent>
+                {roleOptions.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {getRoleLabel(r)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRoleDialogOpen(false)} disabled={userBusyId !== null}>
+              Cancel
+            </Button>
+            <Button onClick={saveUserRole} disabled={userBusyId !== null}>
+              {userBusyId ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import type { KpiMetricKey } from "@/features/kpis/utils/kpi-metrics";
 
 import type { KpiActor } from "@/features/kpis/server/kpi-scope";
 import { canMutateKpiEntries, kpiEntryUserWhereForScope, uiTeamToPrismaTeamCode } from "@/features/kpis/server/kpi-scope";
+import { writeAuditLog } from "@/lib/audit/audit-log";
 
 function dateOnlyToIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -416,10 +417,13 @@ export async function upsertKpiEntry(
   const parsedWeek = parseWeekStarting(input.weekStarting);
   const reportingPeriod = await prisma.reportingPeriod.findFirst({
     where: { kind: "WEEKLY", periodStart: parsedWeek },
-    select: { id: true, periodStart: true },
+    select: { id: true, periodStart: true, isLocked: true },
   });
   if (!reportingPeriod) {
     throw new Error("Unknown reporting period");
+  }
+  if (reportingPeriod.isLocked) {
+    throw new Error("Reporting period is locked");
   }
 
   const teamId = rep.teamId;
@@ -442,36 +446,226 @@ export async function upsertKpiEntry(
     avgAssignmentFee: input.team === "dispositions" ? new Decimal(input.avgAssignmentFee) : null,
   };
 
-  const updated = await prisma.kpiEntry.upsert({
-    where: {
-      userId_reportingPeriodId: {
-        userId: rep.id,
-        reportingPeriodId: reportingPeriod.id,
-      },
-    },
-    create: normalized,
-    update: {
-      dials: normalized.dials,
-      talkTimeMinutes: normalized.talkTimeMinutes,
-      falloutCount: normalized.falloutCount,
-      revenueFromFunded: normalized.revenueFromFunded,
-      leadsWorked: normalized.leadsWorked,
-      offersMade: normalized.offersMade,
-      contractsSigned: normalized.contractsSigned,
-      buyerConversations: normalized.buyerConversations,
-      propertiesMarketed: normalized.propertiesMarketed,
-      emdsReceived: normalized.emdsReceived,
-      assignmentsSecured: normalized.assignmentsSecured,
-      avgAssignmentFee: normalized.avgAssignmentFee,
-      teamId,
+  const whereUnique = {
+    userId_reportingPeriodId: {
+      userId: rep.id,
       reportingPeriodId: reportingPeriod.id,
     },
-    include: {
-      user: { select: { id: true, name: true } },
-      reportingPeriod: { select: { periodStart: true } },
-    },
+  };
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const existing = await tx.kpiEntry.findUnique({
+      where: whereUnique,
+      select: {
+        id: true,
+        dials: true,
+        talkTimeMinutes: true,
+        falloutCount: true,
+        revenueFromFunded: true,
+        leadsWorked: true,
+        offersMade: true,
+        contractsSigned: true,
+        buyerConversations: true,
+        propertiesMarketed: true,
+        emdsReceived: true,
+        assignmentsSecured: true,
+        avgAssignmentFee: true,
+      },
+    });
+
+    const next = await tx.kpiEntry.upsert({
+      where: whereUnique,
+      create: normalized,
+      update: {
+        dials: normalized.dials,
+        talkTimeMinutes: normalized.talkTimeMinutes,
+        falloutCount: normalized.falloutCount,
+        revenueFromFunded: normalized.revenueFromFunded,
+        leadsWorked: normalized.leadsWorked,
+        offersMade: normalized.offersMade,
+        contractsSigned: normalized.contractsSigned,
+        buyerConversations: normalized.buyerConversations,
+        propertiesMarketed: normalized.propertiesMarketed,
+        emdsReceived: normalized.emdsReceived,
+        assignmentsSecured: normalized.assignmentsSecured,
+        avgAssignmentFee: normalized.avgAssignmentFee,
+        teamId,
+        reportingPeriodId: reportingPeriod.id,
+      },
+      include: {
+        user: { select: { id: true, name: true } },
+        reportingPeriod: { select: { periodStart: true } },
+      },
+    });
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: existing ? "kpi.entry.update" : "kpi.entry.create",
+      entityType: "kpi_entry",
+      entityId: next.id,
+      metadata: {
+        team: input.team,
+        weekStarting: input.weekStarting,
+        repUserId: input.repUserId,
+        reportingPeriodId: reportingPeriod.id,
+        before: existing
+          ? {
+              dials: existing.dials,
+              talkTimeMinutes: existing.talkTimeMinutes,
+              falloutCount: existing.falloutCount,
+              revenueFromFunded: existing.revenueFromFunded,
+              leadsWorked: existing.leadsWorked,
+              offersMade: existing.offersMade,
+              contractsSigned: existing.contractsSigned,
+              buyerConversations: existing.buyerConversations,
+              propertiesMarketed: existing.propertiesMarketed,
+              emdsReceived: existing.emdsReceived,
+              assignmentsSecured: existing.assignmentsSecured,
+              avgAssignmentFee: existing.avgAssignmentFee,
+            }
+          : null,
+        after: {
+          dials: input.dials,
+          talkTimeMinutes: input.talkTimeMinutes,
+          falloutCount: input.falloutCount,
+          revenueFromFunded: input.revenueFromFunded,
+          leadsWorked: input.team === "acquisitions" ? input.leadsWorked : null,
+          offersMade: input.team === "acquisitions" ? input.offersMade : null,
+          contractsSigned: input.team === "acquisitions" ? input.contractsSigned : null,
+          buyerConversations: input.team === "dispositions" ? input.buyerConversations : null,
+          propertiesMarketed: input.team === "dispositions" ? input.propertiesMarketed : null,
+          emdsReceived: input.team === "dispositions" ? input.emdsReceived : null,
+          assignmentsSecured: input.team === "dispositions" ? input.assignmentsSecured : null,
+          avgAssignmentFee: input.team === "dispositions" ? input.avgAssignmentFee : null,
+        },
+      },
+    });
+
+    return next;
   });
 
   return mapKpiEntryToDto(updated, input.team);
+}
+
+export type KpiTargetsUpsertInput = {
+  team: Exclude<Team, "operations">;
+  reportingPeriodStart?: string | null;
+  targets: Partial<Record<KpiMetricKey, number>>;
+};
+
+export async function upsertKpiTargets(
+  prisma: PrismaClient,
+  actor: KpiActor,
+  input: KpiTargetsUpsertInput
+): Promise<KpiTargetsByMetricKey> {
+  if (actor.roleCode !== "ADMIN") {
+    throw new Error("Forbidden");
+  }
+
+  const prismaTeamCode = uiTeamToPrismaTeamCode(input.team);
+  const prismaTeam = await prisma.team.findUnique({ where: { code: prismaTeamCode } });
+  if (!prismaTeam) {
+    throw new Error("Unknown team");
+  }
+
+  const reportingPeriodId =
+    input.reportingPeriodStart && input.reportingPeriodStart !== null ? (() => {
+      // Keep parsing logic consistent with KPI entry weeks.
+      const parsed = parseWeekStarting(input.reportingPeriodStart);
+      return parsed;
+    })() : null;
+
+  const period =
+    reportingPeriodId !== null
+      ? await prisma.reportingPeriod.findFirst({
+          where: { kind: "WEEKLY", periodStart: reportingPeriodId },
+          select: { id: true, isLocked: true },
+        })
+      : null;
+
+  if (reportingPeriodId !== null && !period) {
+    throw new Error("Unknown reporting period");
+  }
+  if (period?.isLocked) {
+    throw new Error("Reporting period is locked");
+  }
+
+  const metricKeys = Object.keys(input.targets) as KpiMetricKey[];
+  if (metricKeys.length === 0) return {};
+
+  const updates: Array<{ metricKey: KpiMetricKey; before: number | null; after: number }> = [];
+
+  const finalTargets = await prisma.$transaction(async (tx) => {
+    const reportingPeriodIdToUse = period?.id ?? null;
+
+    // Take the most recently updated row for each metric key to avoid ambiguity if duplicates exist.
+    const existing = await tx.kpiTarget.findMany({
+      where: {
+        teamId: prismaTeam.id,
+        metricKey: { in: metricKeys },
+        reportingPeriodId: reportingPeriodIdToUse,
+      },
+      select: { id: true, metricKey: true, targetValue: true },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    const existingByKey = new Map<string, (typeof existing)[number]>();
+    for (const row of existing) {
+      if (!existingByKey.has(row.metricKey)) existingByKey.set(row.metricKey, row);
+    }
+
+    for (const metricKey of metricKeys) {
+      const after = input.targets[metricKey];
+      if (after == null) continue;
+
+      const prev = existingByKey.get(metricKey);
+
+      if (prev) {
+        await tx.kpiTarget.update({
+          where: { id: prev.id },
+          data: { targetValue: new Decimal(after) },
+        });
+        updates.push({
+          metricKey,
+          before: prev.targetValue == null ? null : Number(prev.targetValue),
+          after,
+        });
+      } else {
+        await tx.kpiTarget.create({
+          data: {
+            teamId: prismaTeam.id,
+            reportingPeriodId: reportingPeriodIdToUse,
+            metricKey,
+            targetValue: new Decimal(after),
+          },
+        });
+        updates.push({
+          metricKey,
+          before: null,
+          after,
+        });
+      }
+    }
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "kpi.targets.update",
+      entityType: "kpi_targets",
+      entityId: `${prismaTeam.code}:${period?.id ?? "global"}`,
+      metadata: {
+        team: input.team,
+        reportingPeriodId: period?.id ?? null,
+        updates,
+      },
+    });
+
+    // Return inputs as normalized values.
+    return updates.reduce((acc, u) => {
+      acc[u.metricKey] = u.after;
+      return acc;
+    }, {} as KpiTargetsByMetricKey);
+  });
+
+  return finalTargets;
 }
 

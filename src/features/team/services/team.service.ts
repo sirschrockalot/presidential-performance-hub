@@ -2,7 +2,6 @@
  * Team Service — SWAP POINT
  */
 import { User, UserRole } from "@/types";
-import { users as mockUsers, getUserPoints, getRepDrawBalance } from "@/mock/mock-data";
 import type { DataScope } from "@/lib/auth/data-scope";
 
 export interface TeamMember extends User {
@@ -11,15 +10,15 @@ export interface TeamMember extends User {
 }
 
 export async function fetchTeamMembers(scope: DataScope = { mode: "full" }): Promise<TeamMember[]> {
-  let rows = [...mockUsers];
-  if (scope.mode === "rep") {
-    rows = rows.filter((u) => u.id === scope.userId);
+  // Server-side scope is derived from the authenticated user; we keep the signature stable for now.
+  void scope;
+
+  const res = await fetch("/api/team/members", { credentials: "include" });
+  if (!res.ok) {
+    throw new Error("Failed to fetch team members");
   }
-  return rows.map((u) => ({
-    ...u,
-    points: getUserPoints(u.id),
-    drawBalance: getRepDrawBalance(u.id),
-  }));
+  const data = (await res.json()) as { members: TeamMember[] };
+  return data.members;
 }
 
 export function getRoleLabel(role: UserRole): string {

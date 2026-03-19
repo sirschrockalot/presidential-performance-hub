@@ -2,6 +2,7 @@ import type { PrismaClient, TeamCode, UserRoleCode } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 import { dealWhereForScope } from "@/features/deals/server/deal-scope";
+import { writeAuditLog } from "@/lib/audit/audit-log";
 
 type PointsActor = {
   id: string;
@@ -205,16 +206,12 @@ export async function listPointRecipientsForManualAdjustment(
   actor: PointsActor
 ): Promise<{ value: string; label: string }[]> {
   // Admin-only capability is enforced by callers; we keep a minimal server-side guard too.
-  if (!["ADMIN", "ACQUISITIONS_MANAGER", "DISPOSITIONS_MANAGER"].includes(actor.roleCode)) return [];
-
-  const repTeamCode =
-    actor.roleCode === "ACQUISITIONS_MANAGER" ? "ACQUISITIONS" : actor.roleCode === "DISPOSITIONS_MANAGER" ? "DISPOSITIONS" : null;
+  if (actor.roleCode !== "ADMIN") return [];
 
   const users = await prisma.user.findMany({
     where: {
       active: true,
-      role: { code: { in: repTeamCode ? ["REP"] : ["REP", "TRANSACTION_COORDINATOR"] } },
-      ...(repTeamCode ? { team: { code: repTeamCode } } : {}),
+      role: { code: { in: ["REP", "TRANSACTION_COORDINATOR"] } },
     },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
@@ -263,16 +260,9 @@ export async function createManualPointAdjustment(
   const reason = input.reason.trim();
   if (!reason) throw new Error("Reason is required");
 
-  // Enforced in route handler too, but we keep a server-side guard and also scope managers.
-  if (!["ADMIN", "ACQUISITIONS_MANAGER", "DISPOSITIONS_MANAGER"].includes(actor.roleCode)) {
+  // Admin-only: keep route and service aligned.
+  if (actor.roleCode !== "ADMIN") {
     throw new Error("Forbidden");
-  }
-
-  if (actor.roleCode === "ACQUISITIONS_MANAGER") {
-    if (recipient.role.code !== "REP" || recipient.team.code !== "ACQUISITIONS") throw new Error("Forbidden");
-  }
-  if (actor.roleCode === "DISPOSITIONS_MANAGER") {
-    if (recipient.role.code !== "REP" || recipient.team.code !== "DISPOSITIONS") throw new Error("Forbidden");
   }
 
   const pointsDecimal = new Decimal(input.points);
@@ -289,7 +279,7 @@ export async function createManualPointAdjustment(
       },
     });
 
-    await tx.pointEvent.create({
+    const event = await tx.pointEvent.create({
       data: {
         userId: input.recipientUserId,
         dealId: input.dealId ?? null,
@@ -302,6 +292,20 @@ export async function createManualPointAdjustment(
     });
 
     adjustmentId = adjustment.id;
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "points.adjustment.create",
+      entityType: "point_adjustment",
+      entityId: adjustment.id,
+      metadata: {
+        recipientUserId: input.recipientUserId,
+        dealId: input.dealId ?? null,
+        points: input.points,
+        reason,
+        pointEventId: event.id,
+      },
+    });
   });
 
   if (!adjustmentId) throw new Error("Failed to create adjustment");

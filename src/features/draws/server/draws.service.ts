@@ -7,6 +7,7 @@ import { checkDrawEligibilityFromDeal } from "@/features/deals/lib/draw-eligibil
 
 import type { DrawActor } from "@/features/draws/server/draw-scope";
 import { drawWhereForScope } from "@/features/draws/server/draw-scope";
+import { writeAuditLog } from "@/lib/audit/audit-log";
 
 import { clampRemainingBalance, validateRecoupmentDelta } from "@/features/draws/utils/remaining-balance";
 
@@ -228,6 +229,20 @@ export async function createDrawRequest(
     },
   });
 
+  await writeAuditLog(prisma, {
+    actorUserId: actor.id,
+    action: "draw.create",
+    entityType: "draw",
+    entityId: created.id,
+    metadata: {
+      dealId: created.dealId,
+      repId: created.repId,
+      amount: decToNumber(created.amount),
+      status: created.status,
+      eligible: created.eligible,
+    },
+  });
+
   return mapDrawToDto(created as any);
 }
 
@@ -253,6 +268,13 @@ export async function updateDrawStatus(
   });
   if (!draw) return null;
 
+  const fromStatus = draw.status;
+
+  // Admin-only control over draw overrides (approval/paid/recoup/deny).
+  if (actor.roleCode !== "ADMIN") {
+    throw new Error("Forbidden");
+  }
+
   if (input.status === "approved") {
     if (draw.status !== "PENDING") {
       throw new Error(`Cannot approve a draw in status "${draw.status}"`);
@@ -273,6 +295,20 @@ export async function updateDrawStatus(
           notes: input.note?.trim() ?? draw.notes,
         },
       });
+      await writeAuditLog(prisma, {
+        actorUserId: actor.id,
+        action: "draw.status_change",
+        entityType: "draw",
+        entityId: draw.id,
+        metadata: {
+          fromStatus,
+          toStatus: "DENIED",
+          approvedRequested: true,
+          eligible: false,
+          reason: "rep_not_assigned_to_deal",
+          note: input.note?.trim() ?? null,
+        },
+      });
       return getDrawById(prisma, actor, draw.id);
     }
 
@@ -291,6 +327,21 @@ export async function updateDrawStatus(
           notes: (input.note?.trim() ?? draw.notes) || eligibility.reason || "",
         },
       });
+      await writeAuditLog(prisma, {
+        actorUserId: actor.id,
+        action: "draw.status_change",
+        entityType: "draw",
+        entityId: draw.id,
+        metadata: {
+          fromStatus,
+          toStatus: "DENIED",
+          approvedRequested: true,
+          eligible: false,
+          reason: "eligibility_failed",
+          note: input.note?.trim() ?? null,
+          eligibilityReason: eligibility.reason ?? null,
+        },
+      });
       return getDrawById(prisma, actor, draw.id);
     }
 
@@ -303,6 +354,19 @@ export async function updateDrawStatus(
         dateIssued: today,
         approvedByUserId: actor.id,
         notes: input.note?.trim() ?? draw.notes,
+      },
+    });
+    await writeAuditLog(prisma, {
+      actorUserId: actor.id,
+      action: "draw.status_change",
+      entityType: "draw",
+      entityId: draw.id,
+      metadata: {
+        fromStatus,
+        toStatus: "APPROVED",
+        approvedRequested: true,
+        eligible: true,
+        note: input.note?.trim() ?? null,
       },
     });
     return getDrawById(prisma, actor, draw.id);
@@ -320,6 +384,19 @@ export async function updateDrawStatus(
         eligible: false,
         approvedByUserId: actor.id,
         notes: input.note?.trim() ?? draw.notes,
+      },
+    });
+    await writeAuditLog(prisma, {
+      actorUserId: actor.id,
+      action: "draw.status_change",
+      entityType: "draw",
+      entityId: draw.id,
+      metadata: {
+        fromStatus,
+        toStatus: "DENIED",
+        requested: "denied",
+        eligible: false,
+        note: input.note?.trim() ?? null,
       },
     });
     return getDrawById(prisma, actor, draw.id);
@@ -348,6 +425,22 @@ export async function updateDrawStatus(
         notes: input.note?.trim() ?? draw.notes,
       },
     });
+    await writeAuditLog(prisma, {
+      actorUserId: actor.id,
+      action: "draw.status_change",
+      entityType: "draw",
+      entityId: draw.id,
+      metadata: {
+        fromStatus,
+        toStatus: nextStatus,
+        requested: "paid",
+        eligible: draw.eligible,
+        amountRecoupedBefore: decToNumber(draw.amountRecouped),
+        amountRecoupedAfter: res.nextAmountRecouped,
+        remainingBalanceAfter: nextRemaining,
+        note: input.note?.trim() ?? null,
+      },
+    });
     return getDrawById(prisma, actor, draw.id);
   }
 
@@ -371,6 +464,21 @@ export async function updateDrawStatus(
         amountRecouped: new Decimal(res.nextAmountRecouped),
         remainingBalance: new Decimal(0),
         notes: input.note?.trim() ?? draw.notes,
+      },
+    });
+    await writeAuditLog(prisma, {
+      actorUserId: actor.id,
+      action: "draw.status_change",
+      entityType: "draw",
+      entityId: draw.id,
+      metadata: {
+        fromStatus,
+        toStatus: "RECOUPED",
+        requested: "recouped",
+        eligible: draw.eligible,
+        amountRecoupedAfter: res.nextAmountRecouped,
+        remainingBalanceAfter: 0,
+        note: input.note?.trim() ?? null,
       },
     });
     return getDrawById(prisma, actor, draw.id);

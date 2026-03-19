@@ -43,6 +43,9 @@ export async function POST(req: Request) {
     if (msg.toLowerCase().includes("forbidden")) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    if (msg.toLowerCase().includes("locked")) {
+      return NextResponse.json({ error: "Reporting period is locked" }, { status: 403 });
+    }
     if (msg.toLowerCase().includes("invalid")) {
       return NextResponse.json({ error: msg }, { status: 400 });
     }

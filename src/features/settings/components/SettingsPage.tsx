@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -9,8 +9,9 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Settings as SettingsIcon, Shield, Building2, Bell, Target, Zap, Save } from 'lucide-react';
 import { toast } from 'sonner';
-import { acquisitionsWeeklyTargets, dispositionsWeeklyTargets, notificationPreferences, integrations } from "@/mock/settings";
 import { useAuthz } from "@/lib/auth/authz-context";
+import { KPI_FIELD_DEFS, type KpiMetricKey } from "@/features/kpis/utils/kpi-metrics";
+import { notificationPreferences, integrations } from "@/mock/settings";
 
 function SettingRow({ label, value, description }: { label: string; value: string; description?: string }) {
   return (
@@ -28,13 +29,75 @@ export default function SettingsPage() {
   const { can } = useAuthz();
   const [saving, setSaving] = useState(false);
   const showAdminSettings = can("settings:admin_sections");
+  const [activeTab, setActiveTab] = useState<string>("general");
 
-  const handleSave = () => {
+  const [acquisitionsTargetsDraft, setAcquisitionsTargetsDraft] = useState<Partial<Record<KpiMetricKey, number>>>({});
+  const [dispositionsTargetsDraft, setDispositionsTargetsDraft] = useState<Partial<Record<KpiMetricKey, number>>>({});
+  const [targetsLoading, setTargetsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!showAdminSettings) return;
+    setTargetsLoading(true);
+    const load = async () => {
+      try {
+        const [acqRes, dispRes] = await Promise.all([
+          fetch("/api/kpis/targets?team=acquisitions", { credentials: "include" }),
+          fetch("/api/kpis/targets?team=dispositions", { credentials: "include" }),
+        ]);
+        if (!acqRes.ok || !dispRes.ok) throw new Error("Failed to load KPI targets");
+
+        const acq = (await acqRes.json()) as { targets: Partial<Record<KpiMetricKey, number>> };
+        const disp = (await dispRes.json()) as { targets: Partial<Record<KpiMetricKey, number>> };
+        setAcquisitionsTargetsDraft(acq.targets ?? {});
+        setDispositionsTargetsDraft(disp.targets ?? {});
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to load KPI targets");
+      } finally {
+        setTargetsLoading(false);
+      }
+    };
+    void load();
+  }, [showAdminSettings]);
+
+  const handleSave = async () => {
     setSaving(true);
-    setTimeout(() => {
+    try {
+      if (activeTab === "targets") {
+        const buildPayload = (defs: typeof KPI_FIELD_DEFS.acquisitions, draft: Partial<Record<KpiMetricKey, number>>) =>
+          Object.fromEntries(defs.map((d) => [d.metricKey, draft[d.metricKey] ?? 0]));
+
+        const acqTargets = buildPayload(KPI_FIELD_DEFS.acquisitions, acquisitionsTargetsDraft);
+        const dispTargets = buildPayload(KPI_FIELD_DEFS.dispositions, dispositionsTargetsDraft);
+
+        const [acqRes, dispRes] = await Promise.all([
+          fetch("/api/kpis/targets", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ team: "acquisitions", reportingPeriodStart: null, targets: acqTargets }),
+          }),
+          fetch("/api/kpis/targets", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ team: "dispositions", reportingPeriodStart: null, targets: dispTargets }),
+          }),
+        ]);
+
+        if (!acqRes.ok || !dispRes.ok) {
+          const err = await acqRes.json().catch(() => null);
+          throw new Error(err?.error ?? "Failed to update KPI targets");
+        }
+
+        toast.success("KPI targets updated");
+      } else {
+        toast.success("Settings saved");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save");
+    } finally {
       setSaving(false);
-      toast.success('Settings saved');
-    }, 600);
+    }
   };
 
   return (
@@ -45,7 +108,7 @@ export default function SettingsPage() {
         </Button>
       </PageHeader>
 
-      <Tabs defaultValue="general">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex flex-wrap h-auto gap-1">
           <TabsTrigger value="general">General</TabsTrigger>
           {showAdminSettings && <TabsTrigger value="targets">KPI Targets</TabsTrigger>}
@@ -116,10 +179,23 @@ export default function SettingsPage() {
               <h3 className="font-semibold">Acquisitions Weekly Targets</h3>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {acquisitionsWeeklyTargets.map((t) => (
-                <div key={t.label} className="space-y-2">
+              {KPI_FIELD_DEFS.acquisitions.map((t) => (
+                <div key={t.metricKey} className="space-y-2">
                   <Label className="text-xs">{t.label}</Label>
-                  <Input defaultValue={t.value} type="number" className="h-9" />
+                  <Input
+                    type="number"
+                    className="h-9"
+                    disabled={targetsLoading || saving}
+                    step={t.kind === "int" ? 1 : 0.01}
+                    value={acquisitionsTargetsDraft[t.metricKey] ?? 0}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      setAcquisitionsTargetsDraft((prev) => ({
+                        ...prev,
+                        [t.metricKey]: Number.isFinite(n) ? n : 0,
+                      }));
+                    }}
+                  />
                 </div>
               ))}
             </div>
@@ -131,10 +207,23 @@ export default function SettingsPage() {
               <h3 className="font-semibold">Dispositions Weekly Targets</h3>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {dispositionsWeeklyTargets.map((t) => (
-                <div key={t.label} className="space-y-2">
+              {KPI_FIELD_DEFS.dispositions.map((t) => (
+                <div key={t.metricKey} className="space-y-2">
                   <Label className="text-xs">{t.label}</Label>
-                  <Input defaultValue={t.value} type="number" className="h-9" />
+                  <Input
+                    type="number"
+                    className="h-9"
+                    disabled={targetsLoading || saving}
+                    step={t.kind === "int" ? 1 : 0.01}
+                    value={dispositionsTargetsDraft[t.metricKey] ?? 0}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      setDispositionsTargetsDraft((prev) => ({
+                        ...prev,
+                        [t.metricKey]: Number.isFinite(n) ? n : 0,
+                      }));
+                    }}
+                  />
                 </div>
               ))}
             </div>

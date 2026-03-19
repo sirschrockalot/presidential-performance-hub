@@ -6,6 +6,7 @@ import { DEAL_STATUS_FROM_UI, DEAL_STATUS_TO_UI, DRAW_STATUS_TO_UI } from "@/dom
 import type { DealStatus as UiDealStatus } from "@/types";
 import type { CreateDealInput, ListDealsQuery, UpdateDealInput, UpdateDealStatusInput } from "@/features/deals/schemas/deal.schemas";
 import { dealWhereForScope, type DealActor } from "@/features/deals/server/deal-scope";
+import { writeAuditLog } from "@/lib/audit/audit-log";
 import { syncPointsForDealFundingTransition } from "@/features/points/server/points.engine";
 
 const dealListInclude = {
@@ -302,6 +303,54 @@ export async function createDeal(
       },
     });
 
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "deal.create",
+      entityType: "deal",
+      entityId: created.id,
+      metadata: {
+        status: created.status,
+      },
+    });
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "deal.status_change",
+      entityType: "deal",
+      entityId: created.id,
+      metadata: {
+        fromStatus: null,
+        toStatus: prismaStatus,
+        note: "Deal created",
+      },
+    });
+
+    // Create funded-deal points immediately if the deal starts in CLOSED_FUNDED.
+    if (prismaStatus === "CLOSED_FUNDED") {
+      const syncStart = new Date();
+      await syncPointsForDealFundingTransition(tx, actor, created.id, prismaStatus);
+
+      const createdPointEvents = await tx.pointEvent.groupBy({
+        by: ["kind"],
+        where: {
+          dealId: created.id,
+          createdAt: { gte: syncStart },
+        },
+        _count: { _all: true },
+      });
+
+      await writeAuditLog(tx, {
+        actorUserId: actor.id,
+        action: "points.generate",
+        entityType: "deal",
+        entityId: created.id,
+        metadata: {
+          transition: { fromStatus: null, toStatus: prismaStatus },
+          pointEventKinds: createdPointEvents.map((g) => ({ kind: g.kind, count: g._count._all })),
+        },
+      });
+    }
+
     if (input.initialNote?.trim()) {
       await tx.dealNote.create({
         data: {
@@ -309,6 +358,14 @@ export async function createDeal(
           authorUserId: actor.id,
           body: input.initialNote.trim(),
         },
+      });
+
+      await writeAuditLog(tx, {
+        actorUserId: actor.id,
+        action: "deal.note.add",
+        entityType: "deal",
+        entityId: created.id,
+        metadata: { note: input.initialNote.trim() },
       });
     }
 
@@ -328,7 +385,7 @@ export async function updateDeal(
 ): Promise<DealDetailDto | null> {
   const existing = await prisma.deal.findFirst({
     where: { AND: [{ id }, dealWhereForScope(actor)] },
-    select: { id: true },
+    select: { id: true, status: true },
   });
   if (!existing) return null;
 
@@ -367,7 +424,19 @@ export async function updateDeal(
     return getDealById(prisma, actor, id);
   }
 
-  await prisma.deal.update({ where: { id }, data });
+  await prisma.$transaction(async (tx) => {
+    await tx.deal.update({ where: { id }, data });
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "deal.update",
+      entityType: "deal",
+      entityId: id,
+      metadata: {
+        before: { status: existing.status },
+        patch: input,
+      },
+    });
+  });
   return getDealById(prisma, actor, id);
 }
 
@@ -403,8 +472,41 @@ export async function updateDealStatus(
       },
     });
 
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "deal.status_change",
+      entityType: "deal",
+      entityId: id,
+      metadata: {
+        fromStatus: existing.status,
+        toStatus: next,
+        note: input.note?.trim() || null,
+      },
+    });
+
     // Award/reverse profit sharing points whenever a deal enters or leaves CLOSED_FUNDED.
+    const syncStart = new Date();
     await syncPointsForDealFundingTransition(tx, actor, id, next);
+
+    const createdPointEvents = await tx.pointEvent.groupBy({
+      by: ["kind"],
+      where: {
+        dealId: id,
+        createdAt: { gte: syncStart },
+      },
+      _count: { _all: true },
+    });
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "points.generate",
+      entityType: "deal",
+      entityId: id,
+      metadata: {
+        transition: { fromStatus: existing.status, toStatus: next },
+        pointEventKinds: createdPointEvents.map((g) => ({ kind: g.kind, count: g._count._all })),
+      },
+    });
   });
 
   return getDealById(prisma, actor, id);
@@ -428,6 +530,14 @@ export async function addDealNote(
       authorUserId: actor.id,
       body: body.trim(),
     },
+  });
+
+  await writeAuditLog(prisma, {
+    actorUserId: actor.id,
+    action: "deal.note.add",
+    entityType: "deal",
+    entityId: dealId,
+    metadata: { note: body.trim() },
   });
 
   return getDealById(prisma, actor, dealId);

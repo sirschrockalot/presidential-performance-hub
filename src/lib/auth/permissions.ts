@@ -76,12 +76,12 @@ export const PERMISSIONS = {
     "REP",
   ],
 
-  "draw:approve": ["ADMIN", "ACQUISITIONS_MANAGER", "DISPOSITIONS_MANAGER"],
+  "draw:approve": ["ADMIN"],
 
-  "points:manual_adjust": ["ADMIN", "ACQUISITIONS_MANAGER", "DISPOSITIONS_MANAGER"],
+  "points:manual_adjust": ["ADMIN"],
 
   /** KPI targets, points rules, draw rules, integrations */
-  "settings:admin_sections": ["ADMIN", "ACQUISITIONS_MANAGER", "DISPOSITIONS_MANAGER"],
+  "settings:admin_sections": ["ADMIN"],
 } as const satisfies Record<string, readonly UserRoleCode[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
