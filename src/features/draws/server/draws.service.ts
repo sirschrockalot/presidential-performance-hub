@@ -1,4 +1,4 @@
-import type { PrismaClient, Prisma } from "@prisma/client";
+import type { PrismaClient, Prisma, TeamCode, UserRoleCode } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 
 import type { DrawStatus, DealStatus, Team } from "@/types";
@@ -56,6 +56,15 @@ function decToNumber(d: Decimal): number {
   return Number(d);
 }
 
+/** Users in these roles on Acq/Dispo teams can be chosen as the draw recipient in forms. */
+const DRAW_FORM_REP_ROLES: UserRoleCode[] = ["REP", "ACQUISITIONS_MANAGER", "DISPOSITIONS_MANAGER"];
+
+function uiTeamFromUserTeam(code: TeamCode): Team {
+  if (code === "ACQUISITIONS") return "acquisitions";
+  if (code === "DISPOSITIONS") return "dispositions";
+  return "operations";
+}
+
 function getStatusDisplay(p: { status: DrawStatus; amountRecouped: number; remainingBalance: number }): DrawStatusDisplay {
   if (p.status === "recouped") return "recouped";
   if (p.status === "denied") return "denied";
@@ -69,13 +78,17 @@ function getStatusDisplay(p: { status: DrawStatus; amountRecouped: number; remai
   return p.status;
 }
 
-function mapDrawToDto(draw: Prisma.DrawGetPayload<{
-  include: {
-    rep: { select: { id: true; name: true; team: { select: { code: true } } } };
-    deal: { select: { id: true; propertyAddress: true } };
-    approvedBy: { select: { id: true; name: true } } | null;
-  };
-}>): DrawWithDetailsDto {
+const drawWithRelationsInclude = {
+  rep: { select: { id: true, name: true, team: { select: { code: true } } } },
+  deal: { select: { id: true, propertyAddress: true } },
+  approvedBy: { select: { id: true, name: true } },
+} as const;
+
+type DrawWithRelations = Prisma.DrawGetPayload<{
+  include: typeof drawWithRelationsInclude;
+}>;
+
+function mapDrawToDto(draw: DrawWithRelations): DrawWithDetailsDto {
   const amount = decToNumber(draw.amount);
   const amountRecouped = decToNumber(draw.amountRecouped);
   const remainingBalance = decToNumber(draw.remainingBalance);
@@ -109,11 +122,7 @@ export async function listDraws(
 
   const draws = await prisma.draw.findMany({
     where,
-    include: {
-      rep: { select: { id: true, name: true, team: { select: { code: true } } } },
-      deal: { select: { id: true, propertyAddress: true } },
-      approvedBy: { select: { id: true, name: true } },
-    },
+    include: drawWithRelationsInclude,
     orderBy: { createdAt: "desc" },
   });
 
@@ -133,11 +142,7 @@ export async function getDrawById(
 ): Promise<DrawDetailDto | null> {
   const draw = await prisma.draw.findFirst({
     where: { AND: [{ id }, drawWhereForScope(actor)] },
-    include: {
-      rep: { select: { id: true, name: true, team: { select: { code: true } } } },
-      deal: { select: { id: true, propertyAddress: true } },
-      approvedBy: { select: { id: true, name: true } },
-    },
+    include: drawWithRelationsInclude,
   });
   if (!draw) return null;
   return mapDrawToDto(draw);
@@ -168,10 +173,10 @@ export async function createDrawRequest(
   actor: DrawActor,
   input: CreateDrawInput
 ): Promise<DrawDetailDto> {
-  // Validate rep exists + role + team (assumes RBAC checks done in route)
+  // Validate rep exists (any active user; assignment enforced against the deal below)
   const rep = await prisma.user.findFirst({
-    where: { id: input.repId, role: { code: "REP" } },
-    select: { id: true, team: { select: { code: true } }, role: { select: { code: true } } },
+    where: { id: input.repId, active: true },
+    select: { id: true, team: { select: { code: true } } },
   });
   if (!rep) throw new Error("Rep not found");
 
@@ -179,8 +184,6 @@ export async function createDrawRequest(
   if (actor.roleCode === "REP" && rep.id !== actor.id) throw new Error("Forbidden");
   if (actor.roleCode === "ACQUISITIONS_MANAGER" && rep.team.code !== "ACQUISITIONS") throw new Error("Forbidden");
   if (actor.roleCode === "DISPOSITIONS_MANAGER" && rep.team.code !== "DISPOSITIONS") throw new Error("Forbidden");
-
-  const repTeamUi = (rep.team.code === "ACQUISITIONS" ? "acquisitions" : "dispositions") as Team;
 
   const deal = await prisma.deal.findFirst({
     where: { id: input.dealId },
@@ -195,11 +198,15 @@ export async function createDrawRequest(
   });
   if (!deal) throw new Error("Deal not found");
 
-  // Enforce rep assignment: rep must be the deal's rep for their team
-  if (repTeamUi === "acquisitions") {
+  // Enforce rep assignment on the deal (Acq/Dispo side, or either side for Ops / other teams)
+  if (rep.team.code === "ACQUISITIONS") {
     if (deal.acquisitionsRepId !== rep.id) throw new Error("Rep is not assigned to deal");
-  } else {
+  } else if (rep.team.code === "DISPOSITIONS") {
     if (deal.dispoRepId !== rep.id) throw new Error("Rep is not assigned to deal");
+  } else {
+    if (deal.acquisitionsRepId !== rep.id && deal.dispoRepId !== rep.id) {
+      throw new Error("Rep is not assigned to deal");
+    }
   }
 
   // Business rule eligibility (server enforced)
@@ -222,11 +229,7 @@ export async function createDrawRequest(
       amountRecouped: new Decimal(0),
       remainingBalance: new Decimal(input.amount),
     },
-    include: {
-      rep: { select: { id: true, name: true, team: { select: { code: true } } } },
-      deal: { select: { id: true, propertyAddress: true } },
-      approvedBy: { select: { id: true, name: true } },
-    },
+    include: drawWithRelationsInclude,
   });
 
   await writeAuditLog(prisma, {
@@ -243,7 +246,7 @@ export async function createDrawRequest(
     },
   });
 
-  return mapDrawToDto(created as any);
+  return mapDrawToDto(created);
 }
 
 export type UpdateDrawStatusInput = {
@@ -492,18 +495,37 @@ export async function listDrawRequestReps(
   actor: DrawActor,
   team?: Team
 ): Promise<DrawRequestRepOptionDto[]> {
-  if (actor.roleCode === "REP") return [{ id: actor.id, name: "You", team: actor.teamCode === "ACQUISITIONS" ? "acquisitions" : "dispositions" }];
+  if (actor.roleCode === "REP") {
+    return [{ id: actor.id, name: "You", team: uiTeamFromUserTeam(actor.teamCode) }];
+  }
 
-  const where: Prisma.UserWhereInput = {
-    role: { code: "REP" },
-  };
+  let where: Prisma.UserWhereInput;
 
-  if (actor.roleCode === "ACQUISITIONS_MANAGER") {
-    where.team = { code: "ACQUISITIONS" };
+  if (actor.roleCode === "ADMIN" || actor.roleCode === "TRANSACTION_COORDINATOR") {
+    // Include all active users on Acq/Dispo teams, plus the signed-in user (e.g. Ops admin after a data cleanup).
+    if (team) {
+      const code = team === "acquisitions" ? "ACQUISITIONS" : "DISPOSITIONS";
+      where = { active: true, team: { code } };
+    } else {
+      where = {
+        active: true,
+        OR: [{ team: { code: { in: ["ACQUISITIONS", "DISPOSITIONS"] } } }, { id: actor.id }],
+      };
+    }
+  } else if (actor.roleCode === "ACQUISITIONS_MANAGER") {
+    where = {
+      active: true,
+      team: { code: "ACQUISITIONS" },
+      role: { code: { in: DRAW_FORM_REP_ROLES } },
+    };
   } else if (actor.roleCode === "DISPOSITIONS_MANAGER") {
-    where.team = { code: "DISPOSITIONS" };
-  } else if (team) {
-    where.team = { code: team === "acquisitions" ? "ACQUISITIONS" : "DISPOSITIONS" };
+    where = {
+      active: true,
+      team: { code: "DISPOSITIONS" },
+      role: { code: { in: DRAW_FORM_REP_ROLES } },
+    };
+  } else {
+    return [];
   }
 
   const reps = await prisma.user.findMany({
@@ -515,7 +537,7 @@ export async function listDrawRequestReps(
   return reps.map((u) => ({
     id: u.id,
     name: u.name,
-    team: u.team.code === "ACQUISITIONS" ? "acquisitions" : "dispositions",
+    team: uiTeamFromUserTeam(u.team.code),
   }));
 }
 
@@ -525,7 +547,7 @@ export async function listDrawRequestDeals(
   repId: string
 ): Promise<DrawRequestDealOptionDto[]> {
   const rep = await prisma.user.findFirst({
-    where: { id: repId, role: { code: "REP" } },
+    where: { id: repId, active: true },
     select: { id: true, team: { select: { code: true } } },
   });
   if (!rep) return [];
@@ -535,15 +557,19 @@ export async function listDrawRequestDeals(
   if (actor.roleCode === "ACQUISITIONS_MANAGER" && rep.team.code !== "ACQUISITIONS") return [];
   if (actor.roleCode === "DISPOSITIONS_MANAGER" && rep.team.code !== "DISPOSITIONS") return [];
 
-  const repTeamUi: Team = rep.team.code === "ACQUISITIONS" ? "acquisitions" : "dispositions";
+  const statusFilter = { in: ["ASSIGNED", "CLOSED_FUNDED"] as const };
 
   // Only include assigned-or-beyond deals; buyer EMD received determines eligibility.
-  // Current business rule for eligibility expects deal.status >= ASSIGNED and buyerEmdReceived.
   const deals = await prisma.deal.findMany({
-    where: {
-      status: { in: ["ASSIGNED", "CLOSED_FUNDED"] },
-      ...(repTeamUi === "acquisitions" ? { acquisitionsRepId: repId } : { dispoRepId: repId }),
-    },
+    where:
+      rep.team.code === "ACQUISITIONS"
+        ? { status: statusFilter, acquisitionsRepId: repId }
+        : rep.team.code === "DISPOSITIONS"
+          ? { status: statusFilter, dispoRepId: repId }
+          : {
+              status: statusFilter,
+              OR: [{ acquisitionsRepId: repId }, { dispoRepId: repId }],
+            },
     select: { id: true, propertyAddress: true, status: true, buyerEmdReceived: true },
     orderBy: { updatedAt: "desc" },
   });
@@ -574,7 +600,7 @@ export async function listRepDrawHistory(
   if (!targetRepId) return [];
 
   const rep = await prisma.user.findFirst({
-    where: { id: targetRepId, role: { code: "REP" } },
+    where: { id: targetRepId, active: true },
     select: { id: true, team: { select: { code: true } } },
   });
   if (!rep) return [];

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { MetricCard } from "@/components/shared/MetricCard";
 import { LoadingState } from "@/components/shared/LoadingState";
@@ -27,6 +28,7 @@ function formatMoney(amount: number): string {
 
 export default function KpiRepScorecardPage() {
   const { user, roleCode } = useAuthz();
+  const searchParams = useSearchParams();
 
   const allowedTeams = useMemo((): Team[] => {
     if (roleCode === "REP") {
@@ -41,6 +43,13 @@ export default function KpiRepScorecardPage() {
     if (!allowedTeams.includes(team)) setTeam(allowedTeams[0]);
   }, [allowedTeams, team]);
 
+  const teamFromUrl = searchParams.get("team") as Team | null;
+  useEffect(() => {
+    if (teamFromUrl && allowedTeams.includes(teamFromUrl)) {
+      setTeam(teamFromUrl);
+    }
+  }, [teamFromUrl, allowedTeams]);
+
   const { data: repUsers } = useKpiFormUsers(team);
   const [selectedRepId, setSelectedRepId] = useState<string>("");
 
@@ -52,6 +61,14 @@ export default function KpiRepScorecardPage() {
     if (!repUsers || repUsers.length === 0) return;
     setSelectedRepId((cur) => cur || repUsers[0].id);
   }, [roleCode, user?.id, repUsers]);
+
+  const repIdFromUrl = searchParams.get("repId");
+  useEffect(() => {
+    if (roleCode === "REP" || !repIdFromUrl || !repUsers?.length) return;
+    if (repUsers.some((r) => r.id === repIdFromUrl)) {
+      setSelectedRepId(repIdFromUrl);
+    }
+  }, [repIdFromUrl, repUsers, roleCode]);
 
   const repId = roleCode === "REP" ? (user?.id ?? "") : selectedRepId;
 

@@ -10,6 +10,13 @@ import type { CreateDrawInput } from "@/features/draws/server/draws.service";
 
 import { drawIdParamSchema, drawListQuerySchema, drawRequestSchema } from "@/features/draws/schemas";
 
+function classifyDrawErrorStatus(message: string): number {
+  const text = message.toLowerCase();
+  if (text.includes("forbidden")) return 403;
+  if (text.includes("not found")) return 404;
+  return 400;
+}
+
 export async function GET(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,7 +29,7 @@ export async function GET(req: Request) {
   }
 
   const actor: DrawActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
-  const draws = await listDraws(prisma, actor, (parsed.data.status ?? "all") as any);
+  const draws = await listDraws(prisma, actor, parsed.data.status ?? "all");
   return NextResponse.json({ draws });
 }
 
@@ -46,14 +53,14 @@ export async function POST(req: Request) {
   }
 
   const actor: DrawActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
-  const input = parsed.data as unknown as CreateDrawInput;
+  const input: CreateDrawInput = parsed.data;
 
   try {
     const entry = await createDrawRequest(prisma, actor, input);
     return NextResponse.json({ draw: entry });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to create draw";
-    return NextResponse.json({ error: msg }, { status: msg.toLowerCase().includes("eligible") ? 400 : 400 });
+    return NextResponse.json({ error: msg }, { status: classifyDrawErrorStatus(msg) });
   }
 }
 

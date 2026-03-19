@@ -1,7 +1,9 @@
 "use client";
 
-import { UseFormReturn } from "react-hook-form";
-import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { useEffect } from "react";
+import { UseFormReturn, useWatch } from "react-hook-form";
+import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { computeAssignmentFee } from "@/features/deals/utils/assignment-fee";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -25,11 +27,24 @@ export function DealFormFields<T extends FormValues>({
   form,
   users,
   showInitialNote,
+  autoCalculateAssignmentFee,
 }: {
   form: UseFormReturn<T>;
   users: AssignmentUserDto[];
   showInitialNote?: boolean;
+  /** When true (new deal), assignment fee = contract − assignment − additional expense. */
+  autoCalculateAssignmentFee?: boolean;
 }) {
+  const contractPrice = useWatch({ control: form.control, name: "contractPrice" as any });
+  const assignmentPrice = useWatch({ control: form.control, name: "assignmentPrice" as any });
+  const additionalExpense = useWatch({ control: form.control, name: "additionalExpense" as any });
+
+  useEffect(() => {
+    if (!autoCalculateAssignmentFee) return;
+    const fee = computeAssignmentFee(contractPrice, assignmentPrice, additionalExpense);
+    form.setValue("assignmentFee" as any, fee, { shouldValidate: false, shouldDirty: false });
+  }, [autoCalculateAssignmentFee, assignmentPrice, additionalExpense, contractPrice, form]);
+
   const acqCandidates = users.filter(
     (u) => u.teamCode === "ACQUISITIONS" && (u.roleCode === "REP" || u.roleCode === "ACQUISITIONS_MANAGER")
   );
@@ -310,13 +325,13 @@ export function DealFormFields<T extends FormValues>({
         />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {autoCalculateAssignmentFee && (
         <FormField
           control={form.control}
-          name={"assignmentFee" as any}
+          name={"additionalExpense" as any}
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Assignment fee</FormLabel>
+              <FormLabel>Additional expense</FormLabel>
               <FormControl>
                 <Input
                   type="number"
@@ -330,6 +345,40 @@ export function DealFormFields<T extends FormValues>({
                   }}
                 />
               </FormControl>
+              <FormDescription>Optional costs deducted before assignment fee (e.g. repairs, fees).</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <FormField
+          control={form.control}
+          name={"assignmentFee" as any}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Assignment fee</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  readOnly={!!autoCalculateAssignmentFee}
+                  tabIndex={autoCalculateAssignmentFee ? -1 : undefined}
+                  className={autoCalculateAssignmentFee ? "bg-muted cursor-default" : undefined}
+                  {...field}
+                  value={field.value === undefined || field.value === null ? "" : String(field.value)}
+                  onChange={(e) => {
+                    if (autoCalculateAssignmentFee) return;
+                    const v = e.target.value;
+                    field.onChange(v === "" ? null : Number(v));
+                  }}
+                />
+              </FormControl>
+              {autoCalculateAssignmentFee ? (
+                <FormDescription>Contract price − assignment price − additional expense (min 0).</FormDescription>
+              ) : null}
               <FormMessage />
             </FormItem>
           )}

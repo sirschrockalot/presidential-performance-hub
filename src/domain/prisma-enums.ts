@@ -68,6 +68,7 @@ export const TEAM_CODE_FROM_UI: Record<string, TeamCode> = {
 
 // ---------------------------------------------------------------------------
 // UserRoleCode (maps to existing `UserRole` union strings in src/types)
+// ACQUISITIONS_MANAGER / DISPOSITIONS_MANAGER = contractor IC roles (legacy names).
 // ---------------------------------------------------------------------------
 
 export const USER_ROLE_CODE_TO_UI: Record<UserRoleCode, string> = {

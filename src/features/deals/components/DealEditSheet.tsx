@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DealFormFields } from "@/features/deals/components/DealFormFields";
 import { useDealFormUsers, useUpdateDeal } from "@/features/deals/hooks/use-deals";
-import { Loader2 } from "lucide-react";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 function dealToFormValues(deal: DealDetailDto): UpdateDealInput {
@@ -43,7 +44,7 @@ export function DealEditSheet({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const { data: users = [], isLoading: usersLoading } = useDealFormUsers();
+  const { data: users = [], isLoading: usersLoading, isError: usersError, error, refetch } = useDealFormUsers();
   const updateMut = useUpdateDeal(deal.id);
 
   const form = useForm<UpdateDealInput>({
@@ -78,6 +79,15 @@ export function DealEditSheet({
           <div className="flex justify-center py-12 text-muted-foreground text-sm">
             <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
           </div>
+        ) : usersError ? (
+          <EmptyState
+            icon={AlertTriangle}
+            title="Unable to load team members"
+            description={error instanceof Error ? error.message : "Could not load assignee options."}
+            actionLabel="Try Again"
+            onAction={() => void refetch()}
+            className="mt-6 py-10"
+          />
         ) : (
           <Form {...form}>
             <form onSubmit={onSubmit} className="space-y-4 mt-6">

@@ -21,7 +21,8 @@
     "prisma:validate": "prisma validate",
     "prisma:seed": "prisma db seed",
     "db:push": "prisma db push",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "db:clear": "tsx prisma/clear-data.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

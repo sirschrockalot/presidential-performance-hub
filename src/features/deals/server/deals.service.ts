@@ -240,6 +240,7 @@ export async function listDeals(
     where,
     include: dealListInclude,
     orderBy: listOrderBy(query),
+    ...(query.limit != null ? { take: query.limit } : {}),
   });
 
   return deals.map(mapDealListRow);

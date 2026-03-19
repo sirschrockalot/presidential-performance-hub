@@ -14,6 +14,7 @@ export type DealListFilters = {
   status?: DealStatus | "all";
   sortBy?: "propertyAddress" | "contractDate" | "status" | "contractPrice" | "updatedAt";
   sortOrder?: "asc" | "desc";
+  limit?: number;
 };
 
 async function parseJson<T>(res: Response): Promise<T> {
@@ -37,6 +38,7 @@ function buildListQuery(f?: DealListFilters): string {
   if (f?.status && f.status !== "all") sp.set("status", f.status);
   if (f?.sortBy) sp.set("sortBy", f.sortBy);
   if (f?.sortOrder) sp.set("sortOrder", f.sortOrder);
+  if (f?.limit != null) sp.set("limit", String(f.limit));
   const q = sp.toString();
   return q ? `?${q}` : "";
 }

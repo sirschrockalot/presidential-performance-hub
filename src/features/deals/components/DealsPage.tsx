@@ -7,13 +7,14 @@ import { ColumnDef } from "@tanstack/react-table";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable } from "@/components/shared/DataTable";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { useDeals } from "@/features/deals/hooks/use-deals";
-import type { DealWithReps } from "@/features/deals/services/placeholder/deals.service";
+import type { DealWithReps } from "@/features/deals/services/deals.service";
 import { DEAL_STATUS_CONFIG, type DealStatus } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, Plus, Filter, ArrowUpDown } from "lucide-react";
+import { Search, Plus, Filter, ArrowUpDown, AlertTriangle } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -37,7 +38,7 @@ export default function DealsPage() {
 
   const debouncedSearch = search;
 
-  const { data: deals, isLoading, isFetching } = useDeals({
+  const { data: deals, isLoading, isFetching, isError, error, refetch } = useDeals({
     search: debouncedSearch || undefined,
     status: statusFilter as DealStatus | "all",
     sortBy,
@@ -174,6 +175,14 @@ export default function DealsPage() {
 
       {isLoading ? (
         <Skeleton className="h-96 rounded-lg" />
+      ) : isError ? (
+        <EmptyState
+          icon={AlertTriangle}
+          title="Unable to load deals"
+          description={error instanceof Error ? error.message : "An unexpected error occurred while loading deals."}
+          actionLabel="Try Again"
+          onAction={() => void refetch()}
+        />
       ) : (
         <DataTable
           columns={columns}

@@ -26,7 +26,19 @@ export function AppProviders({
   /** Optional server-fetched session for faster hydration */
   session?: Session | null;
 }) {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            /** Internal app: avoid refetch storm on every sidebar navigation */
+            staleTime: 60_000,
+            gcTime: 5 * 60_000,
+            refetchOnWindowFocus: false,
+          },
+        },
+      })
+  );
 
   return (
     <SessionProvider session={session ?? undefined}>

@@ -1,32 +1,70 @@
 /**
- * Team Service — SWAP POINT
+ * Client-side Team API (DB-backed via Next route handlers).
  */
-import { User, UserRole } from "@/types";
+import type { UserRole } from "@/types";
+import type { TeamMemberDto } from "@/features/team/types/team.types";
+import type { CreateTeamMemberInput, AdminPatchTeamUserInput } from "@/features/team/schemas/team.schema";
 import type { DataScope } from "@/lib/auth/data-scope";
 
-export interface TeamMember extends User {
-  points: number;
-  drawBalance: number;
+export type { TeamMemberDto, TeamMemberDto as TeamMember } from "@/features/team/types/team.types";
+
+async function parseJson<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(text || res.statusText);
+  }
+  if (!res.ok) {
+    const err = data as { error?: string } | null;
+    throw new Error(err?.error ?? res.statusText);
+  }
+  return data as T;
 }
 
-export async function fetchTeamMembers(scope: DataScope = { mode: "full" }): Promise<TeamMember[]> {
-  // Server-side scope is derived from the authenticated user; we keep the signature stable for now.
+export async function fetchTeamMembers(scope: DataScope = { mode: "full" }): Promise<TeamMemberDto[]> {
   void scope;
-
   const res = await fetch("/api/team/members", { credentials: "include" });
-  if (!res.ok) {
-    throw new Error("Failed to fetch team members");
-  }
-  const data = (await res.json()) as { members: TeamMember[] };
+  const data = await parseJson<{ members: TeamMemberDto[] }>(res);
   return data.members;
+}
+
+export async function fetchTeamMember(id: string): Promise<TeamMemberDto | null> {
+  const res = await fetch(`/api/team/users/${encodeURIComponent(id)}`, { credentials: "include" });
+  if (res.status === 404) return null;
+  const data = await parseJson<{ member: TeamMemberDto }>(res);
+  return data.member;
+}
+
+export async function createTeamMemberApi(input: CreateTeamMemberInput): Promise<TeamMemberDto> {
+  const res = await fetch("/api/team/members", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await parseJson<{ member: TeamMemberDto }>(res);
+  return data.member;
+}
+
+export async function patchTeamUserApi(id: string, input: AdminPatchTeamUserInput): Promise<TeamMemberDto> {
+  const res = await fetch(`/api/team/users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await parseJson<{ member: TeamMemberDto }>(res);
+  return data.member;
 }
 
 export function getRoleLabel(role: UserRole): string {
   const labels: Record<UserRole, string> = {
     admin: "Admin / Owner",
-    acquisitions_manager: "Acquisitions Manager",
-    dispositions_manager: "Dispositions Manager",
-    transaction_coordinator: "Transaction Coordinator",
+    acquisitions_manager: "Acquisitions contractor",
+    dispositions_manager: "Dispositions contractor",
+    transaction_coordinator: "Transaction Coordinator (TC)",
     rep: "Rep / Contractor",
   };
   return labels[role];

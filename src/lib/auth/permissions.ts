@@ -3,6 +3,10 @@ import type { UserRoleCode } from "@prisma/client";
 /**
  * Fine-grained capability keys for UI + server helpers.
  * Maps each permission to roles that may use it.
+ *
+ * Note: `ACQUISITIONS_MANAGER` and `DISPOSITIONS_MANAGER` are legacy enum codes for
+ * **contractor / individual-contributor** roles (not people-managers). Labels below
+ * reflect that; DB codes stay the same for compatibility.
  */
 export const PERMISSIONS = {
   "nav:dashboard": [
@@ -98,9 +102,9 @@ export function roleDisplayLabel(role: UserRoleCode | undefined): string {
     case "ADMIN":
       return "Admin / Owner";
     case "ACQUISITIONS_MANAGER":
-      return "Acquisitions Manager";
+      return "Acquisitions contractor";
     case "DISPOSITIONS_MANAGER":
-      return "Dispositions Manager";
+      return "Dispositions contractor";
     case "TRANSACTION_COORDINATOR":
       return "Transaction Coordinator";
     case "REP":

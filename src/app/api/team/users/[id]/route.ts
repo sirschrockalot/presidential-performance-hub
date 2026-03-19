@@ -1,28 +1,34 @@
 import { NextResponse } from "next/server";
 
-import { z } from "zod";
-
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentUser } from "@/lib/auth/current-user";
 
 import type { TeamActor } from "@/features/team/server/team.service";
-import { adminUpdateUserStatusAndRole } from "@/features/team/server/team.service";
-import { UserRoleCode } from "@prisma/client";
-
-const userIdParamSchema = z.string().min(1);
-
-const updateUserAdminSchema = z
-  .object({
-    active: z.boolean().optional(),
-    roleCode: z.nativeEnum(UserRoleCode).optional(),
-  })
-  .strict()
-  .refine((v) => v.active !== undefined || v.roleCode !== undefined, {
-    message: "Provide at least one of `active` or `roleCode`",
-    path: [],
-  });
+import { getTeamMemberById, adminPatchTeamUser } from "@/features/team/server/team.service";
+import { teamMutationHttpStatus } from "@/features/team/server/team-http";
+import { adminPatchTeamUserSchema, teamMemberIdParamSchema } from "@/features/team/schemas/team.schema";
 
 type RouteParams = { params: Promise<{ id: string }> };
+
+export async function GET(_req: Request, { params }: RouteParams) {
+  const user = await getCurrentUser();
+  if (!user?.roleCode || !user?.teamCode) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await params;
+  const parsedId = teamMemberIdParamSchema.safeParse(id);
+  if (!parsedId.success) {
+    return NextResponse.json({ error: "Invalid user id", details: parsedId.error.flatten() }, { status: 400 });
+  }
+
+  const actor: TeamActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
+  const member = await getTeamMemberById(prisma, actor, parsedId.data);
+  if (!member) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  return NextResponse.json({ member });
+}
 
 export async function PATCH(req: Request, { params }: RouteParams) {
   const user = await getCurrentUser();
@@ -34,9 +40,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   }
 
   const { id } = await params;
-  const parsedId = userIdParamSchema.safeParse(id);
+  const parsedId = teamMemberIdParamSchema.safeParse(id);
   if (!parsedId.success) {
-    return NextResponse.json({ error: "Invalid user id" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid user id", details: parsedId.error.flatten() }, { status: 400 });
   }
 
   let body: unknown;
@@ -46,7 +52,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const parsed = updateUserAdminSchema.safeParse(body);
+  const parsed = adminPatchTeamUserSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Validation failed", details: parsed.error.flatten() }, { status: 400 });
   }
@@ -54,13 +60,10 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const actor: TeamActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
 
   try {
-    const updated = await adminUpdateUserStatusAndRole(prisma, actor, parsedId.data, parsed.data);
-    return NextResponse.json(updated);
+    const { member } = await adminPatchTeamUser(prisma, actor, parsedId.data, parsed.data);
+    return NextResponse.json({ member });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to update user";
-    if (msg.toLowerCase().includes("forbidden")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    if (msg.toLowerCase().includes("not found")) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return NextResponse.json({ error: msg }, { status: teamMutationHttpStatus(msg) });
   }
 }
-

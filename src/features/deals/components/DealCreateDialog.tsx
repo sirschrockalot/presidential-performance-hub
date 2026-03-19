@@ -2,7 +2,11 @@
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { createDealSchema, type CreateDealInput } from "@/features/deals/schemas/deal.schemas";
+import {
+  createDealSchema,
+  type CreateDealFormValues,
+  type CreateDealInput,
+} from "@/features/deals/schemas/deal.schemas";
 import { Form } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +20,7 @@ import {
 import { DealFormFields } from "@/features/deals/components/DealFormFields";
 import { useCreateDeal, useDealFormUsers } from "@/features/deals/hooks/use-deals";
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { EmptyState } from "@/components/shared/EmptyState";
 import {
   Select,
   SelectContent,
@@ -24,11 +29,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DEAL_STATUS_CONFIG, type DealStatus } from "@/types";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
-const defaultValues: CreateDealInput = {
+const defaultValues: CreateDealFormValues = {
   propertyAddress: "",
   sellerName: "",
   buyerName: null,
@@ -41,6 +46,7 @@ const defaultValues: CreateDealInput = {
   inspectionEndDate: null,
   contractPrice: 0,
   assignmentPrice: null,
+  additionalExpense: null,
   assignmentFee: null,
   buyerEmdAmount: null,
   buyerEmdReceived: false,
@@ -57,10 +63,10 @@ export function DealCreateDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const router = useRouter();
-  const { data: users = [], isLoading: usersLoading } = useDealFormUsers();
+  const { data: users = [], isLoading: usersLoading, isError: usersError, error, refetch } = useDealFormUsers();
   const createMut = useCreateDeal();
 
-  const form = useForm<CreateDealInput>({
+  const form = useForm<CreateDealFormValues>({
     resolver: zodResolver(createDealSchema),
     defaultValues,
   });
@@ -88,6 +94,15 @@ export function DealCreateDialog({
           <div className="flex justify-center py-12 text-muted-foreground text-sm">
             <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading team…
           </div>
+        ) : usersError ? (
+          <EmptyState
+            icon={AlertTriangle}
+            title="Unable to load team members"
+            description={error instanceof Error ? error.message : "Could not load assignee options."}
+            actionLabel="Try Again"
+            onAction={() => void refetch()}
+            className="py-10"
+          />
         ) : (
           <Form {...form}>
             <form onSubmit={onSubmit} className="space-y-4">
@@ -115,7 +130,7 @@ export function DealCreateDialog({
                   </FormItem>
                 )}
               />
-              <DealFormFields form={form} users={users} showInitialNote />
+              <DealFormFields form={form} users={users} showInitialNote autoCalculateAssignmentFee />
               <DialogFooter className="gap-2 sm:gap-0">
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   Cancel

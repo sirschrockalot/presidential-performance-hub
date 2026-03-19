@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { computeAssignmentFee } from "@/features/deals/utils/assignment-fee";
 
 /** UI deal status literals (match `src/types` DealStatus) */
 export const dealUiStatusSchema = z.enum([
@@ -30,7 +31,7 @@ const optionalNonNegNumber = z.preprocess((v) => {
   return Number.isFinite(n) ? n : undefined;
 }, z.number().nonnegative().optional());
 
-export const createDealSchema = z.object({
+const createDealBaseSchema = z.object({
   propertyAddress: z.string().min(1, "Property address is required"),
   sellerName: z.string().min(1, "Seller name is required"),
   buyerName: z.preprocess(emptyToNull, z.string().optional().nullable()),
@@ -43,7 +44,9 @@ export const createDealSchema = z.object({
   inspectionEndDate: optionalDateString,
   contractPrice: z.coerce.number().nonnegative("Must be zero or positive"),
   assignmentPrice: optionalNonNegNumber.nullable(),
-  assignmentFee: optionalNonNegNumber.nullable(),
+  /** UI-only; stripped on parse. Assignment fee is always derived from prices + expense. */
+  additionalExpense: optionalNonNegNumber.nullable().optional(),
+  assignmentFee: optionalNonNegNumber.nullable().optional(),
   buyerEmdAmount: optionalNonNegNumber.nullable(),
   buyerEmdReceived: z.coerce.boolean().default(false),
   titleCompany: z.string().min(1, "Title company is required"),
@@ -51,7 +54,17 @@ export const createDealSchema = z.object({
   initialNote: z.preprocess(emptyToNull, z.string().max(10000).optional().nullable()),
 });
 
-export type CreateDealInput = z.infer<typeof createDealSchema>;
+export const createDealSchema = createDealBaseSchema.transform((data) => {
+  const fee = computeAssignmentFee(data.contractPrice, data.assignmentPrice, data.additionalExpense);
+  const { additionalExpense: _additionalExpense, assignmentFee: _ignoredFee, ...rest } = data;
+  return { ...rest, assignmentFee: fee };
+});
+
+/** Payload after validation (no `additionalExpense`; `assignmentFee` is computed). */
+export type CreateDealInput = z.output<typeof createDealSchema>;
+
+/** Form state before Zod transform (includes `additionalExpense`). */
+export type CreateDealFormValues = z.input<typeof createDealSchema>;
 
 export const updateDealSchema = z.object({
   propertyAddress: z.string().min(1).optional(),
@@ -95,6 +108,8 @@ export const listDealsQuerySchema = z.object({
     .optional()
     .default("updatedAt"),
   sortOrder: z.enum(["asc", "desc"]).optional().default("desc"),
+  /** Max rows returned (dashboard / previews). Full table omits this. */
+  limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 
 export type ListDealsQuery = z.infer<typeof listDealsQuerySchema>;

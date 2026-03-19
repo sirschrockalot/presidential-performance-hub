@@ -13,14 +13,14 @@ export async function seedRolesAndTeams(prisma: PrismaClient): Promise<void> {
       {
         id: SEED_IDS.role.ACQUISITIONS_MANAGER,
         code: "ACQUISITIONS_MANAGER",
-        displayName: "Acquisitions Manager",
-        description: "Oversees acquisitions team KPIs and pipeline.",
+        displayName: "Acquisitions contractor",
+        description: "Contractor / individual contributor on acquisitions (not a people-manager role).",
       },
       {
         id: SEED_IDS.role.DISPOSITIONS_MANAGER,
         code: "DISPOSITIONS_MANAGER",
-        displayName: "Dispositions Manager",
-        description: "Oversees dispositions team KPIs and buyer flow.",
+        displayName: "Dispositions contractor",
+        description: "Contractor / individual contributor on dispositions (not a people-manager role).",
       },
       {
         id: SEED_IDS.role.TRANSACTION_COORDINATOR,

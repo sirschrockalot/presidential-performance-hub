@@ -31,6 +31,7 @@ import {
   Banknote,
   Trophy,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -138,7 +139,7 @@ function DealStatusUpdater({
 export default function DealDetailPage() {
   const params = useParams();
   const id = typeof params?.id === "string" ? params.id : "";
-  const { data: deal, isLoading, isFetching } = useDeal(id);
+  const { data: deal, isLoading, isFetching, isError, error, refetch } = useDeal(id);
   const [editOpen, setEditOpen] = useState(false);
   const { can } = useAuthz();
   const [noteDraft, setNoteDraft] = useState("");
@@ -160,6 +161,17 @@ export default function DealDetailPage() {
 
   if (isLoading && !deal) {
     return <LoadingState variant="detail" className="max-w-[1200px] mx-auto" />;
+  }
+  if (isError && !deal) {
+    return (
+      <EmptyState
+        icon={AlertTriangle}
+        title="Unable to load deal"
+        description={error instanceof Error ? error.message : "An unexpected error occurred while loading this deal."}
+        actionLabel="Try Again"
+        onAction={() => void refetch()}
+      />
+    );
   }
   if (!deal) {
     return (

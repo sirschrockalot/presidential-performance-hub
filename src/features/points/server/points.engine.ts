@@ -1,4 +1,4 @@
-import type { DealStatus, PointEventKind } from "@prisma/client";
+import type { DealStatus, PointEventKind, Prisma, PrismaClient } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 
 import type { DealActor } from "@/features/deals/server/deal-scope";
@@ -13,6 +13,8 @@ type RecipientPoints = {
   points: number;
   reasonFragment: string;
 };
+
+type PointPrisma = PrismaClient | Prisma.TransactionClient;
 
 function decToNumber(d: unknown): number {
   return typeof d === "number" ? d : Number(d);
@@ -46,7 +48,7 @@ function isClosedFunded(status: DealStatus) {
   return status === "CLOSED_FUNDED";
 }
 
-async function listRecipientPointsForDeal(prisma: any, dealId: string): Promise<RecipientPoints[]> {
+async function listRecipientPointsForDeal(prisma: PointPrisma, dealId: string): Promise<RecipientPoints[]> {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     select: {
@@ -102,7 +104,7 @@ async function listRecipientPointsForDeal(prisma: any, dealId: string): Promise<
   });
 }
 
-async function getNetNonManualPoints(prisma: any, dealId: string, userId: string): Promise<number> {
+async function getNetNonManualPoints(prisma: PointPrisma, dealId: string, userId: string): Promise<number> {
   const agg = await prisma.pointEvent.aggregate({
     where: {
       dealId,
@@ -116,7 +118,7 @@ async function getNetNonManualPoints(prisma: any, dealId: string, userId: string
 }
 
 export async function syncPointsForDealFundingTransition(
-  prisma: any,
+  prisma: PointPrisma,
   actor: DealActor,
   dealId: string,
   toStatus: DealStatus
@@ -142,15 +144,16 @@ export async function syncPointsForDealFundingTransition(
     const net = await getNetNonManualPoints(prisma, dealId, recipient.userId);
     if (Math.abs(net - expected) < 0.0001) continue;
 
-    const autoExisting = await prisma.pointEvent.findFirst({
+    const autoExistingCount = await prisma.pointEvent.count({
       where: {
         dealId,
         userId: recipient.userId,
         kind: "AUTO_FUNDED_DEAL" as PointEventKind,
       },
     });
+    const hasAutoFundedEvent = autoExistingCount > 0;
 
-    if (!autoExisting) {
+    if (!hasAutoFundedEvent) {
       // Only create AUTO when deal is active and we have a positive expected points.
       if (!shouldBeActive) {
         // No AUTO event exists but net is non-zero. Bring it to 0 with CORRECTION.

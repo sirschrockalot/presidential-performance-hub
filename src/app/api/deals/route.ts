@@ -18,6 +18,7 @@ export async function GET(req: Request) {
     status: searchParams.get("status") || undefined,
     sortBy: searchParams.get("sortBy") || undefined,
     sortOrder: searchParams.get("sortOrder") || undefined,
+    limit: searchParams.get("limit") || undefined,
   };
   const parsed = listDealsQuerySchema.safeParse(raw);
   const query = parsed.success
