@@ -1,3 +1,4 @@
+import { DealStatus as PrismaDealStatus } from "@prisma/client";
 import type { PrismaClient, Prisma, TeamCode, UserRoleCode } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 
@@ -557,7 +558,7 @@ export async function listDrawRequestDeals(
   if (actor.roleCode === "ACQUISITIONS_MANAGER" && rep.team.code !== "ACQUISITIONS") return [];
   if (actor.roleCode === "DISPOSITIONS_MANAGER" && rep.team.code !== "DISPOSITIONS") return [];
 
-  const statusFilter = { in: ["ASSIGNED", "CLOSED_FUNDED"] as const };
+  const statusFilter = { in: [PrismaDealStatus.ASSIGNED, PrismaDealStatus.CLOSED_FUNDED] };
 
   // Only include assigned-or-beyond deals; buyer EMD received determines eligibility.
   const deals = await prisma.deal.findMany({

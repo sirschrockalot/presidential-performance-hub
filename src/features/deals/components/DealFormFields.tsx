@@ -41,8 +41,12 @@ export function DealFormFields<T extends FormValues>({
 
   useEffect(() => {
     if (!autoCalculateAssignmentFee) return;
-    const fee = computeAssignmentFee(contractPrice, assignmentPrice, additionalExpense);
-    form.setValue("assignmentFee" as any, fee, { shouldValidate: false, shouldDirty: false });
+    const fee = computeAssignmentFee(
+      contractPrice as number | null | undefined,
+      assignmentPrice as number | null | undefined,
+      additionalExpense as number | null | undefined
+    );
+    form.setValue("assignmentFee" as any, fee as any, { shouldValidate: false, shouldDirty: false });
   }, [autoCalculateAssignmentFee, assignmentPrice, additionalExpense, contractPrice, form]);
 
   const acqCandidates = users.filter(

@@ -66,7 +66,7 @@ export function DealCreateDialog({
   const { data: users = [], isLoading: usersLoading, isError: usersError, error, refetch } = useDealFormUsers();
   const createMut = useCreateDeal();
 
-  const form = useForm<CreateDealFormValues>({
+  const form = useForm<CreateDealFormValues, unknown, CreateDealInput>({
     resolver: zodResolver(createDealSchema),
     defaultValues,
   });

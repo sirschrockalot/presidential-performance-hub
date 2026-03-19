@@ -13,6 +13,15 @@ export const teamMemberIdParamSchema = z.string().min(1, "Invalid user id");
  * UI literals: acquisitions_manager / dispositions_manager in `src/types`.
  */
 
+export type CreateTeamMemberInput = {
+  name: string;
+  email: string;
+  password: string;
+  roleCode: UserRoleCode;
+  teamCode: TeamCode;
+};
+
+/** Assert output type — Zod `.strict()` widens `z.infer` to all-optional under this project's TS settings. */
 export const createTeamMemberSchema = z
   .object({
     name: z.string().min(1, "Name is required").max(200),
@@ -21,9 +30,7 @@ export const createTeamMemberSchema = z
     roleCode: z.nativeEnum(UserRoleCode),
     teamCode: z.nativeEnum(TeamCode),
   })
-  .strict();
-
-export type CreateTeamMemberInput = z.infer<typeof createTeamMemberSchema>;
+  .strict() as z.ZodType<CreateTeamMemberInput>;
 
 /** Admin (or authorized) PATCH — at least one field */
 export const adminPatchTeamUserSchema = z
@@ -48,6 +55,13 @@ export const adminPatchTeamUserSchema = z
 export type AdminPatchTeamUserInput = z.infer<typeof adminPatchTeamUserSchema>;
 
 /** Edit-member form (subset sent as PATCH) */
+export type EditTeamMemberFormValues = {
+  name: string;
+  email: string;
+  roleCode: UserRoleCode;
+  teamCode: TeamCode;
+};
+
 export const editTeamMemberFormSchema = z
   .object({
     name: z.string().min(1, "Name is required").max(200),
@@ -55,6 +69,4 @@ export const editTeamMemberFormSchema = z
     roleCode: z.nativeEnum(UserRoleCode),
     teamCode: z.nativeEnum(TeamCode),
   })
-  .strict();
-
-export type EditTeamMemberFormValues = z.infer<typeof editTeamMemberFormSchema>;
+  .strict() as z.ZodType<EditTeamMemberFormValues>;
