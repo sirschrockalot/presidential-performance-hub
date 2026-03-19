@@ -24,20 +24,20 @@ export function AppSidebar() {
   return (
     <aside className={cn(
       'flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-200 h-screen sticky top-0',
-      collapsed ? 'w-16' : 'w-60'
+      collapsed ? 'w-[60px]' : 'w-[220px]'
     )}>
       {/* Logo */}
       <div className={cn(
-        'flex items-center gap-3 px-4 h-14 border-b border-sidebar-border',
-        collapsed && 'justify-center px-2'
+        'flex items-center gap-3 h-14 border-b border-sidebar-border',
+        collapsed ? 'justify-center px-2' : 'px-4'
       )}>
-        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-sidebar-accent">
-          <Building2 className="h-4 w-4 text-sidebar-primary" />
+        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary shrink-0">
+          <Building2 className="h-4 w-4 text-primary-foreground" />
         </div>
         {!collapsed && (
           <div className="flex flex-col min-w-0">
-            <span className="text-sm font-bold text-sidebar-primary truncate">Presidential Digs</span>
-            <span className="text-[10px] text-sidebar-muted truncate">Performance Hub</span>
+            <span className="text-[13px] font-bold text-sidebar-primary truncate leading-tight">Presidential Digs</span>
+            <span className="text-[10px] text-sidebar-muted truncate leading-tight">Performance Hub</span>
           </div>
         )}
       </div>
@@ -51,9 +51,9 @@ export function AppSidebar() {
               key={item.path}
               to={item.path}
               className={cn(
-                'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                'flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-all duration-150',
                 isActive
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
                   : 'text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
                 collapsed && 'justify-center px-2'
               )}
@@ -71,8 +71,9 @@ export function AppSidebar() {
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="flex items-center justify-center w-full py-2 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          <ChevronLeft className={cn('h-4 w-4 transition-transform', collapsed && 'rotate-180')} />
+          <ChevronLeft className={cn('h-4 w-4 transition-transform duration-200', collapsed && 'rotate-180')} />
         </button>
       </div>
     </aside>
