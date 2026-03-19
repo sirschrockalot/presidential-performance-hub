@@ -12,6 +12,7 @@ import { activityFeed } from '@/data/activity-feed';
 import {
   ArrowLeft, DollarSign, Calendar, User, Building2, FileText,
   ShieldCheck, ShieldX, Paperclip, Clock, TrendingUp, Percent,
+  Banknote, Trophy,
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
