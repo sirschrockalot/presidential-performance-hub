@@ -97,7 +97,7 @@ export default function CommissionsPage() {
         accessorKey: "commissionEarned",
         header: "Commission",
         cell: ({ getValue }) => (
-          <span className="font-mono tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
+          <span className="font-mono tabular-nums font-semibold text-primary">
             {fmt$(getValue<number>())}
           </span>
         ),
