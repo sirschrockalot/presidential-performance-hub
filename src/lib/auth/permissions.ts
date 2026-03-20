@@ -44,6 +44,13 @@ export const PERMISSIONS = {
     "TRANSACTION_COORDINATOR",
     "REP",
   ],
+  "nav:commissions": [
+    "ADMIN",
+    "ACQUISITIONS_MANAGER",
+    "DISPOSITIONS_MANAGER",
+    "TRANSACTION_COORDINATOR",
+    "REP",
+  ],
   /** Company / team analytics */
   "nav:reports": ["ADMIN", "ACQUISITIONS_MANAGER", "DISPOSITIONS_MANAGER", "TRANSACTION_COORDINATOR"],
   "nav:team": ["ADMIN", "ACQUISITIONS_MANAGER", "DISPOSITIONS_MANAGER", "TRANSACTION_COORDINATOR", "REP"],
