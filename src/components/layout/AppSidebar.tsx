@@ -14,6 +14,7 @@ import {
   Settings,
   ChevronLeft,
   Building2,
+  Percent,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useAuthz } from "@/lib/auth/authz-context";
@@ -25,6 +26,7 @@ const navItems: { label: string; path: string; icon: typeof LayoutDashboard; per
   { label: "KPIs", path: "/kpis", icon: BarChart3, permission: "nav:kpis" },
   { label: "Draws", path: "/draws", icon: Banknote, permission: "nav:draws" },
   { label: "Points", path: "/points", icon: Trophy, permission: "nav:points" },
+  { label: "Commissions", path: "/commissions", icon: Percent, permission: "nav:commissions" },
   { label: "Reports", path: "/reports", icon: FileText, permission: "nav:reports" },
   { label: "Team", path: "/team", icon: Users, permission: "nav:team" },
   { label: "Settings", path: "/settings", icon: Settings, permission: "nav:settings" },
