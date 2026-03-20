@@ -247,9 +247,8 @@ function getActualKpiValueForMetricKey(params: {
     case "CONTRACTS_SIGNED":
       return entry.contractsSigned ?? 0;
     default: {
-      // Defensive: KPI comparison only calls with the supported metric keys.
-      const _exhaustive: never = metricKey;
-      return _exhaustive;
+      // Defensive fallback for non-comparison metric keys.
+      return 0;
     }
   }
 }
@@ -298,8 +297,7 @@ export function computeKpiRepWeeklyCompliance(params: {
           return { dailyTarget, weeklyEquivalentTarget };
         }
         default: {
-          const _exhaustive: never = def.metricKey;
-          return _exhaustive;
+          return { dailyTarget: 0, weeklyEquivalentTarget: 0 };
         }
       }
     })();
@@ -401,8 +399,7 @@ function getActualKpiValueForMetricKeyFromHistory(params: {
     case "CONTRACTS_SIGNED":
       return row.contractsSigned ?? 0;
     default: {
-      const _exhaustive: never = metricKey;
-      return _exhaustive;
+      return 0;
     }
   }
 }
@@ -443,8 +440,7 @@ export function computeKpiRepHistoricalHitRates(params: {
             return weeklyTarget / workingDays;
           }
           default: {
-            const _exhaustive: never = def.metricKey;
-            return _exhaustive;
+            return 0;
           }
         }
       })();

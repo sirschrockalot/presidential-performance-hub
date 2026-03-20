@@ -53,6 +53,53 @@ import {
 } from "@/features/kpis/lib/kpi-compliance";
 import type { KpiTeam } from "@/features/kpis/lib/kpi-compliance";
 
+type KpiEntryNumericField =
+  | "dials"
+  | "talkTimeMinutes"
+  | "leadsWorked"
+  | "offersMade"
+  | "contractsSigned"
+  | "falloutCount"
+  | "revenueFromFunded"
+  | "buyerConversations"
+  | "propertiesMarketed"
+  | "emdsReceived"
+  | "assignmentsSecured"
+  | "avgAssignmentFee";
+
+function getKpiEntryNumericValue(entry: KpiEntryWithRepDto, field: KpiEntryNumericField): number | undefined {
+  switch (field) {
+    case "dials":
+      return entry.dials;
+    case "talkTimeMinutes":
+      return entry.talkTimeMinutes;
+    case "leadsWorked":
+      return entry.leadsWorked;
+    case "offersMade":
+      return entry.offersMade;
+    case "contractsSigned":
+      return entry.contractsSigned;
+    case "falloutCount":
+      return entry.falloutCount;
+    case "revenueFromFunded":
+      return entry.revenueFromFunded;
+    case "buyerConversations":
+      return entry.buyerConversations;
+    case "propertiesMarketed":
+      return entry.propertiesMarketed;
+    case "emdsReceived":
+      return entry.emdsReceived;
+    case "assignmentsSecured":
+      return entry.assignmentsSecured;
+    case "avgAssignmentFee":
+      return entry.avgAssignmentFee;
+    default: {
+      const _exhaustive: never = field;
+      return _exhaustive;
+    }
+  }
+}
+
 function KpiEntryForm({
   team,
   weekStarting,
@@ -595,11 +642,30 @@ export default function KPIsPage() {
         </div>
       )}
 
-      <Tabs value={team} onValueChange={(v) => setTeam(v as Team)}>
-        <TabsList>
-          {allowedTeams.includes("acquisitions") && <TabsTrigger value="acquisitions">Acquisitions</TabsTrigger>}
-          {allowedTeams.includes("dispositions") && <TabsTrigger value="dispositions">Dispositions</TabsTrigger>}
-        </TabsList>
+      <Tabs value={team} onValueChange={(v) => setTeam(v as Team)} className="space-y-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+            View Team KPIs
+          </p>
+          <TabsList className="h-auto w-full max-w-md grid grid-cols-2 rounded-xl border bg-muted/70 p-1.5">
+            {allowedTeams.includes("acquisitions") && (
+              <TabsTrigger
+                value="acquisitions"
+                className="h-11 rounded-lg text-sm font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-primary/20"
+              >
+                Acquisitions
+              </TabsTrigger>
+            )}
+            {allowedTeams.includes("dispositions") && (
+              <TabsTrigger
+                value="dispositions"
+                className="h-11 rounded-lg text-sm font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-primary/20"
+              >
+                Dispositions
+              </TabsTrigger>
+            )}
+          </TabsList>
+        </div>
 
         <TabsContent value={team} className="space-y-6 mt-4">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -767,7 +833,7 @@ export default function KPIsPage() {
                     {KPI_FIELD_DEFS[team]
                       .filter((d) => d.field !== "revenueFromFunded")
                       .map((def) => {
-                        const value = (entry as Record<string, number | undefined>)[def.field];
+                        const value = getKpiEntryNumericValue(entry, def.field as KpiEntryNumericField);
                         const target = targets?.[def.metricKey];
                         const isFallout = def.field === "falloutCount";
                         const isTrackedKpi = kpiMetricKeysForTeam.includes(def.metricKey);
