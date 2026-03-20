@@ -1,14 +1,13 @@
-import { useMemo } from "react";
-import {
-  getCommissionWindows,
-  getRepWindowSummaries,
-} from "../services/placeholder/commissions.service";
+import { useQuery } from "@tanstack/react-query";
 
-/** SWAP POINT: Replace with React Query + API call */
-export function useCommissionWindows() {
-  return useMemo(() => getCommissionWindows(), []);
-}
+import { fetchCommissionsData } from "@/features/commissions/services/commissions.service";
+import { useAuthz } from "@/lib/auth/authz-context";
 
-export function useRepWindowSummaries(windowId: string) {
-  return useMemo(() => getRepWindowSummaries(windowId), [windowId]);
+export function useCommissionsData(windowId?: string) {
+  const { status } = useAuthz();
+  return useQuery({
+    queryKey: ["commissions", windowId ?? "default"],
+    queryFn: () => fetchCommissionsData(windowId),
+    enabled: status === "authenticated",
+  });
 }

@@ -43,6 +43,18 @@ export interface WindowDeal {
   assignmentFee: number;
 }
 
+/** A rep's potential commissions from assigned (not funded) deals */
+export interface PotentialRepSummary {
+  repId: string;
+  repName: string;
+  team: "acquisitions" | "dispositions";
+  assignedDeals: number;
+  assignedRevenue: number;
+  potentialCommissionRate: number;
+  potentialCommission: number;
+  deals: WindowDeal[];
+}
+
 export function getCommissionRate(totalRevenue: number): number {
   if (totalRevenue > 100_000) return 0.12;
   if (totalRevenue > 50_000) return 0.10;

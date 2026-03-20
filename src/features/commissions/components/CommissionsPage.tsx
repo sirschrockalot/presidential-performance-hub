@@ -4,10 +4,10 @@ import { useState, useMemo } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { MetricCard } from "@/components/shared/MetricCard";
 import { DataTable } from "@/components/shared/DataTable";
-import { useCommissionWindows, useRepWindowSummaries } from "../hooks/use-commissions";
+import { useCommissionsData } from "../hooks/use-commissions";
 import { formatWindowLabel } from "../utils/windows";
 import { COMMISSION_TIERS } from "../types";
-import type { RepWindowSummary } from "../types";
+import type { PotentialRepSummary, RepWindowSummary } from "../types";
 import { ColumnDef } from "@tanstack/react-table";
 import {
   Select,
@@ -28,7 +28,11 @@ import {
   Info,
   Percent,
   Handshake,
+  AlertCircle,
+  Target,
 } from "lucide-react";
+import { LoadingState } from "@/components/shared/LoadingState";
+import { EmptyState } from "@/components/shared/EmptyState";
 
 const fmt$ = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -42,12 +46,20 @@ function tierBadgeColor(rate: number): string {
 }
 
 export default function CommissionsPage() {
-  const windows = useCommissionWindows();
-  const currentWindow = windows.find((w) => w.isCurrent) ?? windows[0];
-  const [selectedWindowId, setSelectedWindowId] = useState(currentWindow?.id ?? "w1");
-
-  const summaries = useRepWindowSummaries(selectedWindowId);
-  const selectedWindow = windows.find((w) => w.id === selectedWindowId);
+  const [selectedWindowId, setSelectedWindowId] = useState<string | undefined>(undefined);
+  const { data, isLoading, isError, error, refetch } = useCommissionsData(selectedWindowId);
+  const windows = data?.windows ?? [];
+  const summaries = useMemo(() => data?.summaries ?? [], [data?.summaries]);
+  const potentialSummaries = useMemo(
+    () => data?.potentialSummaries ?? [],
+    [data?.potentialSummaries]
+  );
+  const effectiveWindowId =
+    selectedWindowId ??
+    data?.selectedWindowId ??
+    windows.find((w) => w.isCurrent)?.id ??
+    windows[0]?.id;
+  const selectedWindow = windows.find((w) => w.id === effectiveWindowId);
 
   // Aggregate metrics for the selected window
   const totals = useMemo(() => {
@@ -56,6 +68,13 @@ export default function CommissionsPage() {
     const totalDeals = new Set(summaries.flatMap((r) => r.deals.map((d) => d.dealId))).size;
     return { totalRevenue, totalCommission, totalDeals, repCount: summaries.length };
   }, [summaries]);
+
+  const potentialTotals = useMemo(() => {
+    const totalRevenue = potentialSummaries.reduce((s, r) => s + r.assignedRevenue, 0);
+    const totalCommission = potentialSummaries.reduce((s, r) => s + r.potentialCommission, 0);
+    const totalDeals = new Set(potentialSummaries.flatMap((r) => r.deals.map((d) => d.dealId))).size;
+    return { totalRevenue, totalCommission, totalDeals, repCount: potentialSummaries.length };
+  }, [potentialSummaries]);
 
   const columns: ColumnDef<RepWindowSummary>[] = useMemo(
     () => [
@@ -106,6 +125,75 @@ export default function CommissionsPage() {
     []
   );
 
+  const potentialColumns: ColumnDef<PotentialRepSummary>[] = useMemo(
+    () => [
+      {
+        accessorKey: "repName",
+        header: "Rep",
+        cell: ({ row }) => (
+          <div>
+            <span className="font-medium text-foreground">{row.original.repName}</span>
+            <span className="ml-2 text-xs text-muted-foreground capitalize">{row.original.team}</span>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "assignedDeals",
+        header: "Assigned Deals",
+        cell: ({ getValue }) => <span className="font-mono tabular-nums">{getValue<number>()}</span>,
+      },
+      {
+        accessorKey: "assignedRevenue",
+        header: "Assigned Revenue",
+        cell: ({ getValue }) => (
+          <span className="font-mono tabular-nums font-medium">{fmt$(getValue<number>())}</span>
+        ),
+      },
+      {
+        accessorKey: "potentialCommissionRate",
+        header: "Potential Rate",
+        cell: ({ getValue }) => {
+          const rate = getValue<number>();
+          return (
+            <Badge variant="outline" className={tierBadgeColor(rate)}>
+              {fmtPct(rate)}
+            </Badge>
+          );
+        },
+      },
+      {
+        accessorKey: "potentialCommission",
+        header: "Potential Commission",
+        cell: ({ getValue }) => (
+          <span className="font-mono tabular-nums font-semibold text-primary">
+            {fmt$(getValue<number>())}
+          </span>
+        ),
+      },
+    ],
+    []
+  );
+
+  if (isLoading && !data) return <LoadingState variant="page" />;
+
+  if (isError && !data) {
+    const message = error instanceof Error ? error.message : "Something went wrong";
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Commissions" description="45-day rolling commission windows — 2026" />
+        <EmptyState
+          icon={AlertCircle}
+          title="Could not load commissions"
+          description={message}
+          actionLabel="Try again"
+          onAction={() => void refetch()}
+        />
+      </div>
+    );
+  }
+
+  const selectWindowId = effectiveWindowId ?? "";
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -115,9 +203,9 @@ export default function CommissionsPage() {
         />
         <div className="flex items-center gap-2">
           <CalendarDays className="h-4 w-4 text-muted-foreground" />
-          <Select value={selectedWindowId} onValueChange={setSelectedWindowId}>
+          <Select value={selectWindowId} onValueChange={setSelectedWindowId}>
             <SelectTrigger className="w-[260px]">
-              <SelectValue />
+              <SelectValue placeholder="Select window" />
             </SelectTrigger>
             <SelectContent>
               {windows.map((w) => (
@@ -284,6 +372,48 @@ export default function CommissionsPage() {
             </div>
           ) : (
             <DataTable columns={columns} data={summaries} />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Potential commissions section */}
+      <Card className="border-dashed">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Target className="h-4 w-4 text-muted-foreground" />
+            Potential Commissions (Assigned, Not Closed/Funded)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <MetricCard
+              title="Assigned Revenue"
+              value={fmt$(potentialTotals.totalRevenue)}
+              icon={DollarSign}
+            />
+            <MetricCard
+              title="Potential Commission"
+              value={fmt$(potentialTotals.totalCommission)}
+              icon={TrendingUp}
+            />
+            <MetricCard
+              title="Assigned Deals"
+              value={String(potentialTotals.totalDeals)}
+              icon={Handshake}
+            />
+            <MetricCard
+              title="Active Reps"
+              value={String(potentialTotals.repCount)}
+              icon={Users}
+            />
+          </div>
+
+          {potentialSummaries.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground text-sm">
+              No assigned deals pending funding right now.
+            </div>
+          ) : (
+            <DataTable columns={potentialColumns} data={potentialSummaries} />
           )}
         </CardContent>
       </Card>
