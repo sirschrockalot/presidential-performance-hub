@@ -239,7 +239,7 @@ export default function CommissionsPage() {
                     <span className="text-xs text-muted-foreground">
                       {rep.fundedDeals} deal{rep.fundedDeals !== 1 ? "s" : ""}
                     </span>
-                    <span className="font-mono tabular-nums text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                    <span className="font-mono tabular-nums text-sm font-semibold text-primary">
                       {fmt$(rep.commissionEarned)}
                     </span>
                   </div>
