@@ -14,6 +14,7 @@ import {
   Settings,
   ChevronLeft,
   Building2,
+  Percent,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useAuthz } from "@/lib/auth/authz-context";
