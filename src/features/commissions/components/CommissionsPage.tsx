@@ -6,7 +6,7 @@ import { MetricCard } from "@/components/shared/MetricCard";
 import { DataTable } from "@/components/shared/DataTable";
 import { useCommissionsData } from "../hooks/use-commissions";
 import { formatWindowLabel } from "../utils/windows";
-import { COMMISSION_TIERS } from "../types";
+import { COMMISSION_FUNDING_MILESTONE_BONUSES, COMMISSION_TIERS } from "../types";
 import type { PotentialRepSummary, RepWindowSummary } from "../types";
 import { ColumnDef } from "@tanstack/react-table";
 import {
@@ -113,8 +113,22 @@ export default function CommissionsPage() {
         },
       },
       {
+        accessorKey: "tierCommission",
+        header: "Tier",
+        cell: ({ getValue }) => (
+          <span className="font-mono tabular-nums text-muted-foreground">{fmt$(getValue<number>())}</span>
+        ),
+      },
+      {
+        accessorKey: "milestoneBonus",
+        header: "Milestones",
+        cell: ({ getValue }) => (
+          <span className="font-mono tabular-nums">{fmt$(getValue<number>())}</span>
+        ),
+      },
+      {
         accessorKey: "commissionEarned",
-        header: "Commission",
+        header: "Total",
         cell: ({ getValue }) => (
           <span className="font-mono tabular-nums font-semibold text-primary">
             {fmt$(getValue<number>())}
@@ -162,8 +176,22 @@ export default function CommissionsPage() {
         },
       },
       {
+        accessorKey: "tierPotentialCommission",
+        header: "Tier",
+        cell: ({ getValue }) => (
+          <span className="font-mono tabular-nums text-muted-foreground">{fmt$(getValue<number>())}</span>
+        ),
+      },
+      {
+        accessorKey: "milestoneBonus",
+        header: "Milestones",
+        cell: ({ getValue }) => (
+          <span className="font-mono tabular-nums">{fmt$(getValue<number>())}</span>
+        ),
+      },
+      {
         accessorKey: "potentialCommission",
-        header: "Potential Commission",
+        header: "Total",
         cell: ({ getValue }) => (
           <span className="font-mono tabular-nums font-semibold text-primary">
             {fmt$(getValue<number>())}
@@ -230,23 +258,42 @@ export default function CommissionsPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium flex items-center gap-2 text-muted-foreground">
             <Info className="h-4 w-4" />
-            Commission Tier Structure (flat rate on total funded revenue per 45-day window)
+            Commission structure (per rep: tier % on funded revenue in each 45-day window + cumulative
+            funding milestones)
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-6">
-            {COMMISSION_TIERS.map((tier) => (
-              <div key={tier.label} className="flex items-center gap-3">
-                <Badge variant="outline" className={tierBadgeColor(tier.rate)}>
-                  {fmtPct(tier.rate)}
-                </Badge>
-                <span className="text-sm text-muted-foreground">
-                  {tier.maxRevenue
-                    ? `${fmt$(tier.minRevenue)} – ${fmt$(tier.maxRevenue)}`
-                    : `${fmt$(tier.minRevenue)}+`}
-                </span>
-              </div>
-            ))}
+        <CardContent className="space-y-6">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-3">Tier rates</p>
+            <div className="flex flex-wrap gap-6">
+              {COMMISSION_TIERS.map((tier) => (
+                <div key={tier.label} className="flex items-center gap-3">
+                  <Badge variant="outline" className={tierBadgeColor(tier.rate)}>
+                    {fmtPct(tier.rate)}
+                  </Badge>
+                  <span className="text-sm text-muted-foreground">
+                    {tier.maxRevenue
+                      ? `${fmt$(tier.minRevenue)} – ${fmt$(tier.maxRevenue)}`
+                      : `${fmt$(tier.minRevenue)}+`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-3">
+              Flat bonuses (stack when each threshold is reached)
+            </p>
+            <div className="flex flex-wrap gap-x-8 gap-y-2">
+              {COMMISSION_FUNDING_MILESTONE_BONUSES.map((row) => (
+                <div key={row.fundedThreshold} className="flex items-center gap-2 text-sm">
+                  <Badge variant="secondary" className="font-mono tabular-nums">
+                    {fmt$(row.bonus)}
+                  </Badge>
+                  <span className="text-muted-foreground">at {fmt$(row.fundedThreshold)} funded</span>
+                </div>
+              ))}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -260,6 +307,7 @@ export default function CommissionsPage() {
         />
         <MetricCard
           title="Total Commission"
+          subtitle="Tier % + milestone bonuses"
           value={fmt$(totals.totalCommission)}
           icon={TrendingUp}
         />
@@ -327,9 +375,16 @@ export default function CommissionsPage() {
                     <span className="text-xs text-muted-foreground">
                       {rep.fundedDeals} deal{rep.fundedDeals !== 1 ? "s" : ""}
                     </span>
-                    <span className="font-mono tabular-nums text-sm font-semibold text-primary">
-                      {fmt$(rep.commissionEarned)}
-                    </span>
+                    <div className="text-right">
+                      {rep.milestoneBonus > 0 && (
+                        <p className="text-[10px] text-muted-foreground font-mono tabular-nums">
+                          +{fmt$(rep.milestoneBonus)} milestones
+                        </p>
+                      )}
+                      <span className="font-mono tabular-nums text-sm font-semibold text-primary">
+                        {fmt$(rep.commissionEarned)} total
+                      </span>
+                    </div>
                   </div>
 
                   {/* Deal list */}
@@ -393,6 +448,7 @@ export default function CommissionsPage() {
             />
             <MetricCard
               title="Potential Commission"
+              subtitle="Tier % + milestone bonuses"
               value={fmt$(potentialTotals.totalCommission)}
               icon={TrendingUp}
             />

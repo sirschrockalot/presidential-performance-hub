@@ -6,6 +6,7 @@ import { monthShortLabel, monthKeyUtc, resolveReportsDateRange, weekStartingKeyU
 import type { Team } from "@/types";
 import { uiTeamToPrismaTeamCode } from "@/features/kpis/server/kpi-scope";
 import { dealWhereForScope } from "@/features/deals/server/deal-scope";
+import { resolvedAssignmentFeeOrCompute } from "@/features/deals/utils/assignment-fee";
 import { drawWhereForScope } from "@/features/draws/server/draw-scope";
 
 import type { DealActor } from "@/features/deals/server/deal-scope";
@@ -95,11 +96,18 @@ export type PointsSummaryRow = {
   distinctAutoDealCount: number;
 };
 
+export type AssignmentFeeAveragesDto = {
+  closedFunded: { dealCount: number; dealsWithFee: number; avgAssignmentFee: number };
+  potentialPipeline: { dealCount: number; dealsWithFee: number; avgAssignmentFee: number };
+};
+
 export type ReportsDataDto = {
   filterOptions: {
     repOptions: { value: string; label: string }[];
     teamOptions: { value: Team | "all"; label: string }[];
   };
+  /** Avg assignment fee: closed/funded in range vs open pipeline (not closed/funded, not canceled) in range */
+  assignmentFeeAverages: AssignmentFeeAveragesDto;
   weeklySummary: WeeklySummaryRow[];
   monthlySummary: MonthlySummaryRow[];
   dealDistributionByStatus: { status: DealStatus; count: number }[];
@@ -113,6 +121,19 @@ export type ReportsDataDto = {
 function n(d: Prisma.Decimal | number | null | undefined): number | null {
   if (d == null) return null;
   return typeof d === "number" ? d : Number(d);
+}
+
+function effectiveAssignmentFee(d: {
+  assignmentFee: Prisma.Decimal | null;
+  assignmentPrice: Prisma.Decimal | null;
+  contractPrice: Prisma.Decimal;
+}): number | null {
+  return resolvedAssignmentFeeOrCompute(
+    n(d.contractPrice),
+    d.assignmentPrice != null ? n(d.assignmentPrice) : null,
+    d.assignmentFee != null ? n(d.assignmentFee) : null,
+    0
+  );
 }
 
 function actorDealWhere(actor: ReportsActor): Prisma.DealWhereInput {
@@ -233,6 +254,7 @@ export async function listReportsData(prisma: PrismaClient, actor: ReportsActor,
         id: true,
         status: true,
         assignmentFee: true,
+        assignmentPrice: true,
         contractPrice: true,
         propertyAddress: true,
         closedFundedDate: true,
@@ -255,6 +277,7 @@ export async function listReportsData(prisma: PrismaClient, actor: ReportsActor,
         id: true,
         status: true,
         assignmentFee: true,
+        assignmentPrice: true,
         contractPrice: true,
         closedFundedDate: true,
         propertyAddress: true,
@@ -312,11 +335,36 @@ export async function listReportsData(prisma: PrismaClient, actor: ReportsActor,
     }),
   ]);
 
+  const closedEffectiveFees = fundedDeals
+    .map((d) => effectiveAssignmentFee(d))
+    .filter((x): x is number => x != null && !Number.isNaN(x));
+  const potentialDeals = allDeals.filter((d) => d.status !== "CLOSED_FUNDED" && d.status !== "CANCELED");
+  const potentialEffectiveFees = potentialDeals
+    .map((d) => effectiveAssignmentFee(d))
+    .filter((x): x is number => x != null && !Number.isNaN(x));
+
+  const assignmentFeeAverages: AssignmentFeeAveragesDto = {
+    closedFunded: {
+      dealCount: fundedDeals.length,
+      dealsWithFee: closedEffectiveFees.length,
+      avgAssignmentFee: closedEffectiveFees.length
+        ? closedEffectiveFees.reduce((a, b) => a + b, 0) / closedEffectiveFees.length
+        : 0,
+    },
+    potentialPipeline: {
+      dealCount: potentialDeals.length,
+      dealsWithFee: potentialEffectiveFees.length,
+      avgAssignmentFee: potentialEffectiveFees.length
+        ? potentialEffectiveFees.reduce((a, b) => a + b, 0) / potentialEffectiveFees.length
+        : 0,
+    },
+  };
+
   // Weekly summary (funded deals only).
   const weeklyMap = new Map<string, { fundedDeals: number; totalRevenue: number; sumFee: number }>();
   for (const d of fundedDeals) {
     const key = weekStartingKeyUtc(d.closedFundedDate ?? start);
-    const fee = n(d.assignmentFee) ?? 0;
+    const fee = effectiveAssignmentFee(d) ?? 0;
     const cur = weeklyMap.get(key) ?? { fundedDeals: 0, totalRevenue: 0, sumFee: 0 };
     cur.fundedDeals += 1;
     cur.totalRevenue += fee;
@@ -336,7 +384,7 @@ export async function listReportsData(prisma: PrismaClient, actor: ReportsActor,
   const monthlyMap = new Map<string, { fundedDeals: number; totalRevenue: number; sumFee: number }>();
   for (const d of fundedDeals) {
     const key = monthKeyUtc(d.closedFundedDate ?? start);
-    const fee = n(d.assignmentFee) ?? 0;
+    const fee = effectiveAssignmentFee(d) ?? 0;
     const cur = monthlyMap.get(key) ?? { fundedDeals: 0, totalRevenue: 0, sumFee: 0 };
     cur.fundedDeals += 1;
     cur.totalRevenue += fee;
@@ -415,7 +463,7 @@ export async function listReportsData(prisma: PrismaClient, actor: ReportsActor,
 
   // Deal profitability rows.
   const dealProfitability = (filters.dealStatus === "CLOSED_FUNDED" ? fundedDeals : allDeals).map((d) => {
-    const assignmentFee = n(d.assignmentFee);
+    const assignmentFee = effectiveAssignmentFee(d);
     const contractPrice = n(d.contractPrice) ?? 0;
     const marginPct = assignmentFee != null && contractPrice ? (assignmentFee / contractPrice) * 100 : null;
 
@@ -436,7 +484,7 @@ export async function listReportsData(prisma: PrismaClient, actor: ReportsActor,
   // Rep performance rows (funded deals only).
   const repPerfMap = new Map<string, { repName: string; teamCode: TeamCode; fundedDeals: number; totalRevenue: number; totalContractPrice: number }>();
   for (const d of fundedDeals) {
-    const fee = n(d.assignmentFee) ?? 0;
+    const fee = effectiveAssignmentFee(d) ?? 0;
     const contract = n(d.contractPrice) ?? 0;
     // Acquisitions rep always exists.
     const acq = d.acquisitionsRep;
@@ -476,7 +524,7 @@ export async function listReportsData(prisma: PrismaClient, actor: ReportsActor,
   // Team performance rows (funded deals only).
   const teamPerfMap = new Map<TeamCode, { teamName: string; fundedDeals: number; totalRevenue: number; totalContractPrice: number; pointsTotal: number }>();
   for (const d of fundedDeals) {
-    const fee = n(d.assignmentFee) ?? 0;
+    const fee = effectiveAssignmentFee(d) ?? 0;
     const contract = n(d.contractPrice) ?? 0;
 
     const acqTeam = d.acquisitionsRep.team.code;
@@ -548,6 +596,7 @@ export async function listReportsData(prisma: PrismaClient, actor: ReportsActor,
 
   return {
     filterOptions: { repOptions, teamOptions },
+    assignmentFeeAverages,
     weeklySummary,
     monthlySummary,
     dealDistributionByStatus,

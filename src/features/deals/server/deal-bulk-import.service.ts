@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { DealActor } from "@/features/deals/server/deal-scope";
 import { dealWhereForScope } from "@/features/deals/server/deal-scope";
 import { createDeal, updateDeal, updateDealStatus } from "@/features/deals/server/deals.service";
+import { computeAssignmentFee } from "@/features/deals/utils/assignment-fee";
 import type { DealImportRow, DealBulkImportInput } from "@/features/deals/schemas/deal-bulk-import.schemas";
 import type { DealUiStatus } from "@/features/deals/schemas/deal.schemas";
 
@@ -147,6 +148,14 @@ function normalizeRow(row: DealImportRow): { data: NormalizedDealImportRow | nul
   if (!contractDate) return { data: null, error: "Missing/invalid contractDate (YYYY-MM-DD)" };
   if (contractPrice == null) return { data: null, error: "Missing purchasePrice or offerAmount" };
 
+  const additionalExpense = row.additionalExpenses ?? row.additionalExpense ?? 0;
+  const assignmentFeeComputed =
+    row.salePrice != null
+      ? computeAssignmentFee(contractPrice, row.salePrice, additionalExpense)
+      : null;
+  const assignmentFee =
+    assignmentFeeComputed != null ? assignmentFeeComputed : row.assignmentFee ?? null;
+
   return {
     data: {
       propertyAddress,
@@ -158,7 +167,7 @@ function normalizeRow(row: DealImportRow): { data: NormalizedDealImportRow | nul
       closedFundedDate: toDateOnlyOrNull(row.closingDate),
       contractPrice,
       assignmentPrice: row.salePrice,
-      assignmentFee: row.assignmentFee,
+      assignmentFee,
       buyerEmdAmount: row.emdAmount,
       status: normalizeStatus(row.status),
       initialNote: row.notes ?? null,

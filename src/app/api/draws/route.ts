@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import {
+  guardSessionActorWithTeam,
+  guardSessionActorWithTeamAndPermission,
+} from "@/lib/auth/api-route-guard";
 
 import type { DrawActor } from "@/features/draws/server/draw-scope";
 import { listDraws, createDrawRequest } from "@/features/draws/server/draws.service";
 import type { CreateDrawInput } from "@/features/draws/server/draws.service";
 
 import { drawIdParamSchema, drawListQuerySchema, drawRequestSchema } from "@/features/draws/schemas";
+import { revalidateDrawReads } from "@/lib/cache/revalidation";
 
 function classifyDrawErrorStatus(message: string): number {
   const text = message.toLowerCase();
@@ -18,8 +21,9 @@ function classifyDrawErrorStatus(message: string): number {
 }
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await guardSessionActorWithTeam();
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status") ?? undefined;
@@ -34,11 +38,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!roleHasPermission(user.roleCode, "draw:new_request")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardSessionActorWithTeamAndPermission("draw:new_request");
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   let body: unknown;
   try {
@@ -57,6 +59,7 @@ export async function POST(req: Request) {
 
   try {
     const entry = await createDrawRequest(prisma, actor, input);
+    revalidateDrawReads();
     return NextResponse.json({ draw: entry });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to create draw";

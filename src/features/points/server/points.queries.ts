@@ -4,7 +4,7 @@ import { Decimal } from "@prisma/client/runtime/library";
 import { dealWhereForScope } from "@/features/deals/server/deal-scope";
 import { writeAuditLog } from "@/lib/audit/audit-log";
 
-type PointsActor = {
+export type PointsActor = {
   id: string;
   roleCode: UserRoleCode;
   teamCode: TeamCode;
@@ -105,7 +105,8 @@ export async function getPointsMetrics(prisma: PrismaClient, actor: PointsActor)
 
 export async function getPointsLeaderboard(
   prisma: PrismaClient,
-  actor: PointsActor
+  actor: PointsActor,
+  options?: { maxRows?: number }
 ): Promise<PointsLeaderboardEntryDto[]> {
   const where = pointsWhereForActor(actor);
 
@@ -126,7 +127,7 @@ export async function getPointsLeaderboard(
   });
   const autoCountByUser = new Map(autoCounts.map((g) => [g.userId, g._count._all]));
 
-  return grouped
+  const sorted = grouped
     .map((g) => {
       const u = userById.get(g.userId);
       if (!u) return null;
@@ -141,6 +142,12 @@ export async function getPointsLeaderboard(
     })
     .filter(Boolean)
     .sort((a, b) => b!.points - a!.points) as PointsLeaderboardEntryDto[];
+
+  const cap = options?.maxRows;
+  if (cap != null && cap > 0 && sorted.length > cap) {
+    return sorted.slice(0, cap);
+  }
+  return sorted;
 }
 
 export async function listPointEvents(
@@ -201,6 +208,41 @@ export async function listPointEvents(
   });
 }
 
+export async function canActorViewRepPointsSummary(
+  prisma: PrismaClient,
+  actor: PointsActor,
+  repId: string
+): Promise<boolean> {
+  if (actor.roleCode === "ADMIN") return true;
+  if (actor.roleCode === "REP") return repId === actor.id;
+
+  const target = await prisma.user.findUnique({
+    where: { id: repId },
+    select: { team: { select: { code: true } } },
+  });
+  if (!target) return false;
+
+  if (actor.roleCode === "ACQUISITIONS_MANAGER") {
+    return target.team.code === "ACQUISITIONS";
+  }
+  if (actor.roleCode === "DISPOSITIONS_MANAGER") {
+    return target.team.code === "DISPOSITIONS";
+  }
+  if (actor.roleCode === "TRANSACTION_COORDINATOR") {
+    if (repId === actor.id) return true;
+    const linked = await prisma.deal.findFirst({
+      where: {
+        transactionCoordinatorId: actor.id,
+        OR: [{ acquisitionsRepId: repId }, { dispoRepId: repId }],
+      },
+      select: { id: true },
+    });
+    return !!linked;
+  }
+
+  return false;
+}
+
 export async function listPointRecipientsForManualAdjustment(
   prisma: PrismaClient,
   actor: PointsActor
@@ -225,12 +267,14 @@ export async function getRepPointsSummary(
   actor: PointsActor,
   repId: string
 ): Promise<{ repId: string; points: number; manualAdjustments: number; fundedDealEventCount: number }> {
-  // Access control: reps can only view themselves.
-  if (actor.roleCode === "REP" && repId !== actor.id) {
-    return { repId, points: 0, manualAdjustments: 0, fundedDealEventCount: 0 };
+  const allowed = await canActorViewRepPointsSummary(prisma, actor, repId);
+  if (!allowed) {
+    throw new Error("Forbidden");
   }
 
-  const where = { userId: repId } as Prisma.PointEventWhereInput;
+  const where: Prisma.PointEventWhereInput = {
+    AND: [pointsWhereForActor(actor), { userId: repId }],
+  };
 
   const pts = await prisma.pointEvent.aggregate({ where, _sum: { points: true } });
   const manual = await prisma.pointEvent.count({ where: { ...where, kind: "MANUAL_ADJUSTMENT" } });

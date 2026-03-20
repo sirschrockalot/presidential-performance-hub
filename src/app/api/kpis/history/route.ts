@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
+import { guardSessionActorWithTeam } from "@/lib/auth/api-route-guard";
 
 import { kpiHistoryQuerySchema } from "@/features/kpis/schemas";
 import { listKpiHistory } from "@/features/kpis/server/kpis.service";
@@ -10,10 +10,9 @@ import type { KpiActor } from "@/features/kpis/server/kpi-scope";
 import { CACHE_TAGS } from "@/lib/cache/revalidation";
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser();
-  if (!user?.roleCode || !user?.teamCode) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await guardSessionActorWithTeam();
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const { searchParams } = new URL(req.url);
   const raw = {

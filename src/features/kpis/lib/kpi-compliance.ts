@@ -1,5 +1,5 @@
 import type { Team } from "@/types";
-import type { KpiEntryWithRepDto, KpiHistoryRowDto, KpiTargetsByMetricKey } from "@/features/kpis/server/kpis.service";
+import type { KpiEntryLikeForWeek, KpiHistoryRowDto, KpiTargetsByMetricKey } from "@/features/kpis/server/kpis.service";
 import type { KpiFieldDef, KpiMetricKey } from "@/features/kpis/utils/kpi-metrics";
 import { KPI_FIELD_DEFS, formatTalkTimeMinutes } from "@/features/kpis/utils/kpi-metrics";
 
@@ -229,8 +229,6 @@ export function computeKpiMetricComparison(params: {
   };
 }
 
-type KpiEntryLikeForWeek = Pick<KpiEntryWithRepDto, "dials" | "talkTimeMinutes" | "offersMade" | "contractsSigned" | "userId" | "repName" | "weekStarting">;
-
 function getActualKpiValueForMetricKey(params: {
   team: KpiTeam;
   metricKey: KpiMetricKey;
@@ -333,7 +331,7 @@ export function computeKpiRepWeeklyCompliance(params: {
 export function computeKpiTeamComplianceSummary(params: {
   team: KpiTeam;
   weekStarting: string;
-  entries: KpiEntryWithRepDto[];
+  entries: KpiEntryLikeForWeek[];
   targets: KpiTargetsByMetricKey;
   workingDays?: number;
 }): KpiTeamComplianceSummary {
@@ -533,12 +531,12 @@ function buildTeamRecapSentence(params: {
 
 export function generateWeeklyKpiSummaryText(params: {
   weekStarting: string;
-  acquisitions: { entries: KpiEntryWithRepDto[]; targets: KpiTargetsByMetricKey };
-  dispositions: { entries: KpiEntryWithRepDto[]; targets: KpiTargetsByMetricKey };
+  acquisitions: { entries: KpiEntryLikeForWeek[]; targets: KpiTargetsByMetricKey };
+  dispositions: { entries: KpiEntryLikeForWeek[]; targets: KpiTargetsByMetricKey };
 }): WeeklyKpiSummaryTextOutput {
   const { weekStarting, acquisitions, dispositions } = params;
 
-  const computeTeamReps = (team: KpiTeam, entries: KpiEntryWithRepDto[], targets: KpiTargetsByMetricKey) =>
+  const computeTeamReps = (team: KpiTeam, entries: KpiEntryLikeForWeek[], targets: KpiTargetsByMetricKey) =>
     entries
       .map((e) =>
         computeKpiRepWeeklyCompliance({

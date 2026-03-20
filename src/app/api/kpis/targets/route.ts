@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import {
+  guardSessionActorWithTeam,
+  guardSessionActorWithTeamAndPermission,
+} from "@/lib/auth/api-route-guard";
 
 import { kpiTeamQuerySchema, weekStartingSchema } from "@/features/kpis/schemas";
 import { listKpiTargetsForTeam, upsertKpiTargets } from "@/features/kpis/server/kpis.service";
@@ -12,10 +14,9 @@ import { z } from "zod";
 import { CACHE_TAGS, revalidateKpiReads, revalidateKpiTargetsAndUsers } from "@/lib/cache/revalidation";
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser();
-  if (!user?.roleCode || !user?.teamCode) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await guardSessionActorWithTeam();
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const { searchParams } = new URL(req.url);
   const raw = { team: searchParams.get("team") };
@@ -58,13 +59,9 @@ const kpiTargetsUpsertSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const user = await getCurrentUser();
-  if (!user?.roleCode || !user?.teamCode) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!roleHasPermission(user.roleCode, "settings:admin_sections")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardSessionActorWithTeamAndPermission("settings:admin_sections");
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   let body: unknown;
   try {

@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
+import {
+  guardSessionActorWithTeam,
+  guardSessionActorWithTeamAndPermission,
+} from "@/lib/auth/api-route-guard";
 
 import type { TeamActor } from "@/features/team/server/team.service";
 import { getTeamMemberById, adminPatchTeamUser } from "@/features/team/server/team.service";
@@ -11,10 +14,9 @@ import { adminPatchTeamUserSchema, teamMemberIdParamSchema } from "@/features/te
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, { params }: RouteParams) {
-  const user = await getCurrentUser();
-  if (!user?.roleCode || !user?.teamCode) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await guardSessionActorWithTeam();
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const { id } = await params;
   const parsedId = teamMemberIdParamSchema.safeParse(id);
@@ -31,13 +33,9 @@ export async function GET(_req: Request, { params }: RouteParams) {
 }
 
 export async function PATCH(req: Request, { params }: RouteParams) {
-  const user = await getCurrentUser();
-  if (!user?.roleCode || !user?.teamCode) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (user.roleCode !== "ADMIN") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardSessionActorWithTeamAndPermission("settings:admin_sections");
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const { id } = await params;
   const parsedId = teamMemberIdParamSchema.safeParse(id);

@@ -23,6 +23,12 @@ function decToNumber(d: Decimal): number {
 
 export type KpiEntryWithRepDto = UiKpiEntry & { repName: string };
 
+/** Fields required for weekly compliance math (`computeKpiRepWeeklyCompliance` / team summaries). */
+export type KpiEntryLikeForWeek = Pick<
+  KpiEntryWithRepDto,
+  "dials" | "talkTimeMinutes" | "offersMade" | "contractsSigned" | "userId" | "repName" | "weekStarting"
+>;
+
 export type KpiWeekSummaryDto = {
   totalDials: number;
   totalTalkTime: number;
@@ -190,6 +196,55 @@ export async function listKpiEntries(
   });
 
   return entries.map((e) => mapKpiEntryToDto(e, team));
+}
+
+/**
+ * Same scope/filtering as `listKpiEntries`, but loads only columns needed for compliance summaries.
+ * Used by the dashboard overview KPI block to avoid pulling full KPI rows (e.g. fallout, revenue, disp-only fields).
+ */
+export async function listKpiEntriesDashboardCompliance(
+  prisma: PrismaClient,
+  actor: KpiActor,
+  team: Team,
+  weekStarting: string | undefined
+): Promise<KpiEntryLikeForWeek[]> {
+  const requestedTeamCode = uiTeamToPrismaTeamCode(team);
+  const userScope = kpiEntryUserWhereForScope(actor, requestedTeamCode);
+
+  if (userScope.userId === "__none__") return [];
+
+  const parsedWeek = weekStarting ? parseWeekStarting(weekStarting) : null;
+  const reportingPeriodWhere: Prisma.ReportingPeriodWhereInput = parsedWeek
+    ? { kind: "WEEKLY", periodStart: parsedWeek }
+    : { kind: "WEEKLY" };
+
+  const entries = await prisma.kpiEntry.findMany({
+    where: {
+      team: { code: requestedTeamCode },
+      ...(userScope.userId ? { userId: userScope.userId } : {}),
+      reportingPeriod: reportingPeriodWhere,
+    },
+    select: {
+      userId: true,
+      dials: true,
+      talkTimeMinutes: true,
+      offersMade: true,
+      contractsSigned: true,
+      user: { select: { name: true } },
+      reportingPeriod: { select: { periodStart: true } },
+    },
+    orderBy: { user: { name: "asc" } },
+  });
+
+  return entries.map((e) => ({
+    userId: e.userId,
+    repName: e.user?.name ?? "Unknown",
+    weekStarting: e.reportingPeriod ? dateOnlyToIsoDate(e.reportingPeriod.periodStart) : (weekStarting ?? ""),
+    dials: e.dials,
+    talkTimeMinutes: e.talkTimeMinutes,
+    offersMade: e.offersMade ?? undefined,
+    contractsSigned: e.contractsSigned ?? undefined,
+  }));
 }
 
 export async function getKpiWeekSummary(

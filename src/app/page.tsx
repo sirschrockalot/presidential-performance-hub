@@ -1,4 +1,6 @@
 "use client";
 
-export { default } from "@/features/dashboard/components/DashboardPage";
+import DashboardPage from "@/features/dashboard/components/DashboardPage";
+
+export default DashboardPage;
 

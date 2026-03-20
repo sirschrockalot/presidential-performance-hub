@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { MAX_DEAL_IMPORT_ROWS } from "@/lib/security/import-limits";
+
 const optionalTrimmedString = z
   .union([z.string(), z.null(), z.undefined()])
   .transform((value) => {
@@ -55,6 +57,9 @@ export const dealImportRowSchema = z
     closingDate: optionalDateString,
     purchasePrice: optionalNonNegative,
     salePrice: optionalNonNegative,
+    /** When set with prices, fee = sale − purchase − additionalExpenses (may be negative); otherwise legacy `assignmentFee` may be used. */
+    additionalExpenses: optionalNonNegative,
+    additionalExpense: optionalNonNegative,
     assignmentFee: optionalNonNegative,
     emdAmount: optionalNonNegative,
     arv: optionalNonNegative,
@@ -66,7 +71,10 @@ export const dealImportRowSchema = z
 
 export const dealBulkImportSchema = z
   .object({
-    deals: z.array(dealImportRowSchema).min(1, "At least one deal is required"),
+    deals: z
+      .array(dealImportRowSchema)
+      .min(1, "At least one deal is required")
+      .max(MAX_DEAL_IMPORT_ROWS, `At most ${MAX_DEAL_IMPORT_ROWS} deals per request`),
   })
   .strict();
 

@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ColumnDef } from '@tanstack/react-table';
@@ -10,7 +11,6 @@ import { useCreateManualPointAdjustment, usePointEvents, usePointRecipients, use
 import type { PointEventRowDto } from '@/features/points/api/points-client';
 import { useAuthz } from "@/lib/auth/authz-context";
 import { Trophy, Star, TrendingUp, Award, Plus, Info } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip as ReTooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { ManualPointAdjustmentModal } from "@/features/points/components/ManualPointAdjustmentModal";
 import {
@@ -24,7 +24,13 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 
-const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
+const PointsByRepBarChart = dynamic(
+  () => import("@/features/points/components/PointsByRepBarChart").then((m) => m.PointsByRepBarChart),
+  {
+    ssr: false,
+    loading: () => <div className="h-[280px] w-full rounded-md bg-muted/40 animate-pulse" aria-hidden />,
+  }
+);
 
 export default function PointsPage() {
   const { dataScope, can } = useAuthz();
@@ -167,19 +173,7 @@ export default function PointsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 rounded-lg border bg-card p-5">
           <h3 className="text-sm font-semibold mb-4">Points by Rep</h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={chartData} barSize={36}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
-              <ReTooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
-              <Bar dataKey="points" radius={[4, 4, 0, 0]}>
-                {chartData.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <PointsByRepBarChart chartData={chartData} />
         </div>
 
         <div className="rounded-lg border bg-card p-5">

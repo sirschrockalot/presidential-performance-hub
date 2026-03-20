@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getApiSessionUser } from "@/lib/auth/require-api-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import { guardApiSessionUserWithPermission } from "@/lib/auth/api-route-guard";
 import { updateDealStatusSchema } from "@/features/deals/schemas/deal.schemas";
 import { updateDealStatus } from "@/features/deals/server/deals.service";
 import { revalidateDealReads } from "@/lib/cache/revalidation";
@@ -10,13 +9,9 @@ import { revalidateDealReads } from "@/lib/cache/revalidation";
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: Request, { params }: RouteParams) {
-  const actor = await getApiSessionUser();
-  if (!actor) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!roleHasPermission(actor.roleCode, "deal:edit")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardApiSessionUserWithPermission("deal:edit");
+  if (auth.ok === false) return auth.response;
+  const actor = auth.user;
 
   const { id } = await params;
 

@@ -1,19 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import { guardSessionActorWithTeamAndPermission } from "@/lib/auth/api-route-guard";
 
 import { reportsFiltersSchema } from "@/features/reports/schemas";
 import { listReportsData } from "@/features/reports/server/reports.queries";
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser();
-  if (!user?.roleCode || !user?.teamCode) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  if (!roleHasPermission(user.roleCode, "nav:reports")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardSessionActorWithTeamAndPermission("nav:reports");
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const { searchParams } = new URL(req.url);
 

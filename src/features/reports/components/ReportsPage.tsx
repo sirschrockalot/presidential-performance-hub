@@ -42,7 +42,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { FileText, DollarSign, TrendingUp, Download, Banknote, Trophy, Star } from "lucide-react";
+import { FileText, DollarSign, TrendingUp, Download, Banknote, Trophy, Star, Target } from "lucide-react";
 import { toast } from "sonner";
 
 import { reportsDatePresetSchema } from "@/features/reports/schemas";
@@ -82,7 +82,6 @@ export default function ReportsPage() {
 
   const totalRevenue = useMemo(() => (data?.weeklySummary ?? []).reduce((s, r) => s + r.totalRevenue, 0), [data]);
   const fundedDealsCount = useMemo(() => (data?.weeklySummary ?? []).reduce((s, r) => s + r.fundedDeals, 0), [data]);
-  const avgFee = useMemo(() => (fundedDealsCount ? totalRevenue / fundedDealsCount : 0), [totalRevenue, fundedDealsCount]);
   const drawOutstanding = useMemo(() => (data?.drawExposure ?? []).reduce((s, r) => s + r.outstandingBalance, 0), [data]);
 
   const dealsByStatus = useMemo(() => {
@@ -415,9 +414,21 @@ export default function ReportsPage() {
         </div>
       </PageHeader>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <MetricCard title="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} icon={DollarSign} variant="success" />
-        <MetricCard title="Avg Fee" value={`$${Math.round(avgFee).toLocaleString()}`} icon={TrendingUp} />
+        <MetricCard
+          title="Avg Assignment — Closed/Funded"
+          value={`$${Math.round(data.assignmentFeeAverages.closedFunded.avgAssignmentFee).toLocaleString()}`}
+          icon={TrendingUp}
+          subtitle={`${data.assignmentFeeAverages.closedFunded.dealsWithFee} of ${data.assignmentFeeAverages.closedFunded.dealCount} with fee/spread`}
+        />
+        <MetricCard
+          title="Avg Assignment — Open Pipeline"
+          value={`$${Math.round(data.assignmentFeeAverages.potentialPipeline.avgAssignmentFee).toLocaleString()}`}
+          icon={Target}
+          variant="info"
+          subtitle={`${data.assignmentFeeAverages.potentialPipeline.dealsWithFee} of ${data.assignmentFeeAverages.potentialPipeline.dealCount} with fee/spread · updated in range`}
+        />
         <MetricCard title="Funded Deals" value={fundedDealsCount} icon={FileText} variant="info" />
         <MetricCard title="Draw Exposure (Approved/Paid)" value={`$${drawOutstanding.toLocaleString()}`} icon={Banknote} variant="warning" />
       </div>

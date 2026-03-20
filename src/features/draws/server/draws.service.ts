@@ -150,15 +150,29 @@ export async function getDrawById(
 }
 
 export async function getDrawMetrics(prisma: PrismaClient, actor: DrawActor) {
-  const draws = await listDraws(prisma, actor, "all");
-  const outstanding = draws
-    .filter((d) => d.status === "approved" || d.status === "paid")
-    .reduce((s, d) => s + d.remainingBalance, 0);
+  const where = drawWhereForScope(actor);
+
+  const [outstandingAgg, pendingCount, totalRecoupedAgg, ineligibleCount] = await Promise.all([
+    prisma.draw.aggregate({
+      where: { ...where, status: { in: ["APPROVED", "PAID"] } },
+      _sum: { remainingBalance: true },
+    }),
+    prisma.draw.count({ where: { ...where, status: "PENDING" } }),
+    prisma.draw.aggregate({
+      where,
+      _sum: { amountRecouped: true },
+    }),
+    prisma.draw.count({ where: { ...where, eligible: false } }),
+  ]);
+
+  const rb = outstandingAgg._sum.remainingBalance;
+  const ar = totalRecoupedAgg._sum.amountRecouped;
+
   return {
-    outstanding,
-    pendingCount: draws.filter((d) => d.status === "pending").length,
-    totalRecouped: draws.reduce((s, d) => s + d.amountRecouped, 0),
-    ineligibleCount: draws.filter((d) => !d.eligible).length,
+    outstanding: rb != null ? decToNumber(rb) : 0,
+    pendingCount,
+    totalRecouped: ar != null ? decToNumber(ar) : 0,
+    ineligibleCount,
   };
 }
 

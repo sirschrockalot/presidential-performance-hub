@@ -14,6 +14,7 @@ import {
 import type { CreateDrawInput, DrawDetailDto, DrawRequestDealOptionDto, DrawRequestRepOptionDto, DrawWithDetailsDto } from "@/features/draws/server/draws.service";
 import type { DrawStatus } from "@/types";
 import { useAuthz } from "@/lib/auth/authz-context";
+import { DASHBOARD_BUNDLE_QUERY_KEY_ROOT } from "@/features/dashboard/hooks/use-dashboard-bundle";
 
 export function useDraws(statusFilter?: DrawStatus | "all" | "partially_recouped") {
   const { status } = useAuthz();
@@ -76,6 +77,7 @@ export function useCreateDrawRequest() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["draws"] });
       qc.invalidateQueries({ queryKey: ["draw-metrics"] });
+      qc.invalidateQueries({ queryKey: [DASHBOARD_BUNDLE_QUERY_KEY_ROOT], exact: false });
     },
   });
 }
@@ -88,6 +90,7 @@ export function useUpdateDrawStatus(drawId: string) {
       qc.invalidateQueries({ queryKey: ["draw", drawId] });
       qc.invalidateQueries({ queryKey: ["draws"] });
       qc.invalidateQueries({ queryKey: ["draw-metrics"] });
+      qc.invalidateQueries({ queryKey: [DASHBOARD_BUNDLE_QUERY_KEY_ROOT], exact: false });
     },
   });
 }

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import { guardSessionActorWithTeamAndPermission } from "@/lib/auth/api-route-guard";
 import { z } from "zod";
 
 import type { DrawActor } from "@/features/draws/server/draw-scope";
@@ -13,11 +12,9 @@ const querySchema = z.object({
 });
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!roleHasPermission(user.roleCode, "draw:new_request")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardSessionActorWithTeamAndPermission("draw:new_request");
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const { searchParams } = new URL(req.url);
   const parsed = querySchema.safeParse({ repId: searchParams.get("repId") });

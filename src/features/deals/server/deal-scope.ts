@@ -1,9 +1,11 @@
 import type { Prisma } from "@prisma/client";
-import type { UserRoleCode } from "@prisma/client";
+import type { TeamCode, UserRoleCode } from "@prisma/client";
 
 export type DealActor = {
   id: string;
   roleCode: UserRoleCode;
+  /** Present for API/session actors; used for assignment validation. */
+  teamCode?: TeamCode;
 };
 
 /**

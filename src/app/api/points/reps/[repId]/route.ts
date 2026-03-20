@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
+import { guardSessionActorWithTeam } from "@/lib/auth/api-route-guard";
 
 import { listPointEvents, getRepPointsSummary } from "@/features/points/server/points.queries";
 import { pointsEventsQuerySchema } from "@/features/points/schemas";
@@ -9,8 +9,8 @@ import { pointsEventsQuerySchema } from "@/features/points/schemas";
 type RouteParams = { params: Promise<{ repId: string }> };
 
 export async function GET(req: Request, { params }: RouteParams) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await guardSessionActorWithTeam();
+  if (auth.ok === false) return auth.response;
 
   const { repId } = await params;
   if (!repId) return NextResponse.json({ error: "Bad Request" }, { status: 400 });
@@ -28,11 +28,17 @@ export async function GET(req: Request, { params }: RouteParams) {
     );
   }
 
-  const actor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
+  const actor = auth.user;
 
-  const summary = await getRepPointsSummary(prisma, actor, repId);
-  const events = await listPointEvents(prisma, actor, parsed.data);
-
-  return NextResponse.json({ summary, events });
+  try {
+    const summary = await getRepPointsSummary(prisma, actor, repId);
+    const events = await listPointEvents(prisma, actor, parsed.data);
+    return NextResponse.json({ summary, events });
+  } catch (e) {
+    if (e instanceof Error && e.message === "Forbidden") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    throw e;
+  }
 }
 

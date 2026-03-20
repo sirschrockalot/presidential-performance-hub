@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { updateDealSchema, type UpdateDealInput } from "@/features/deals/schemas/deal.schemas";
 import type { DealDetailDto } from "@/features/deals/api/deals-client";
+import { computeAssignmentFee } from "@/features/deals/utils/assignment-fee";
 import { Form } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -28,7 +29,11 @@ function dealToFormValues(deal: DealDetailDto): UpdateDealInput {
     inspectionEndDate: deal.inspectionEndDate,
     contractPrice: deal.contractPrice,
     assignmentPrice: deal.assignmentPrice,
-    assignmentFee: deal.assignmentFee,
+    /** User-entered only; never reverse-calculated from the saved fee. */
+    additionalExpense: null,
+    /** Match the live formula when both prices exist so the field isn’t stuck on a stale DB value. */
+    assignmentFee:
+      computeAssignmentFee(deal.contractPrice, deal.assignmentPrice, null) ?? deal.assignmentFee,
     buyerEmdAmount: deal.buyerEmdAmount,
     buyerEmdReceived: deal.buyerEmdReceived,
     titleCompany: deal.titleCompany,
@@ -91,7 +96,7 @@ export function DealEditSheet({
         ) : (
           <Form {...form}>
             <form onSubmit={onSubmit} className="space-y-4 mt-6">
-              <DealFormFields form={form} users={users} />
+              <DealFormFields form={form} users={users} autoCalculateAssignmentFee />
               <Button type="submit" className="w-full" disabled={updateMut.isPending}>
                 {updateMut.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Save changes

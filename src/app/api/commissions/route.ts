@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
+import { guardSessionActor } from "@/lib/auth/api-route-guard";
 import {
   listCommissionWindows,
   listPotentialRepSummaries,
@@ -10,10 +10,9 @@ import {
 import type { DealActor } from "@/features/deals/server/deal-scope";
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser();
-  if (!user?.roleCode) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await guardSessionActor();
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const windows = listCommissionWindows();
   const { searchParams } = new URL(req.url);

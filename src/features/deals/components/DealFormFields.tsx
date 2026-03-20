@@ -32,7 +32,7 @@ export function DealFormFields<T extends FormValues>({
   form: UseFormReturn<T>;
   users: AssignmentUserDto[];
   showInitialNote?: boolean;
-  /** When true (new deal), assignment fee = contract − assignment − additional expense. */
+  /** When true: assignment fee = assignment price − contract price [− additional expense if entered]. */
   autoCalculateAssignmentFee?: boolean;
 }) {
   const contractPrice = useWatch({ control: form.control, name: "contractPrice" as any });
@@ -46,7 +46,11 @@ export function DealFormFields<T extends FormValues>({
       assignmentPrice as number | null | undefined,
       additionalExpense as number | null | undefined
     );
-    form.setValue("assignmentFee" as any, fee as any, { shouldValidate: false, shouldDirty: false });
+    form.setValue("assignmentFee" as any, fee as any, {
+      shouldValidate: false,
+      shouldDirty: false,
+      shouldTouch: true,
+    });
   }, [autoCalculateAssignmentFee, assignmentPrice, additionalExpense, contractPrice, form]);
 
   const acqCandidates = users.filter(
@@ -349,7 +353,9 @@ export function DealFormFields<T extends FormValues>({
                   }}
                 />
               </FormControl>
-              <FormDescription>Optional costs deducted before assignment fee (e.g. repairs, fees).</FormDescription>
+              <FormDescription>
+                Optional. If you enter a value: Assignment price − Contract price − Additional expense = Assignment fee.
+              </FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -367,7 +373,6 @@ export function DealFormFields<T extends FormValues>({
                 <Input
                   type="number"
                   step="0.01"
-                  min={0}
                   readOnly={!!autoCalculateAssignmentFee}
                   tabIndex={autoCalculateAssignmentFee ? -1 : undefined}
                   className={autoCalculateAssignmentFee ? "bg-muted cursor-default" : undefined}
@@ -381,7 +386,10 @@ export function DealFormFields<T extends FormValues>({
                 />
               </FormControl>
               {autoCalculateAssignmentFee ? (
-                <FormDescription>Contract price − assignment price − additional expense (min 0).</FormDescription>
+                <FormDescription>
+                  Assignment price − Contract price = Assignment fee. With an additional expense entered: Assignment price
+                  − Contract price − Additional expense = Assignment fee.
+                </FormDescription>
               ) : null}
               <FormMessage />
             </FormItem>

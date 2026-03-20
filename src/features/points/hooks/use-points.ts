@@ -10,6 +10,7 @@ import {
   fetchRepPointsDetailApi,
 } from "@/features/points/services/points.service";
 import { useAuthz } from "@/lib/auth/authz-context";
+import { DASHBOARD_BUNDLE_QUERY_KEY_ROOT } from "@/features/dashboard/hooks/use-dashboard-bundle";
 
 export function usePointEvents(options?: { repId?: string; year?: number; month?: number }) {
   const { status } = useAuthz();
@@ -55,6 +56,7 @@ export function useCreateManualPointAdjustment() {
       qc.invalidateQueries({ queryKey: ["leaderboard"] });
       qc.invalidateQueries({ queryKey: ["points-metrics"] });
       qc.invalidateQueries({ queryKey: ["point-events"] });
+      qc.invalidateQueries({ queryKey: [DASHBOARD_BUNDLE_QUERY_KEY_ROOT], exact: false });
     },
   });
 }

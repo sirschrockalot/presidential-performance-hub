@@ -4,7 +4,7 @@
  */
 import type { DealListRow as DealListRowT } from "@/features/deals/api/deals-client";
 
-export type { DealListRow, DealDetailDto, DealMetricsDto } from "@/features/deals/api/deals-client";
+export type { DealListRow, DealDetailDto, DealMetricsDto, DashboardRecentDealRow } from "@/features/deals/api/deals-client";
 
 /** Alias for table typings (same shape as former `DealWithReps`) */
 export type DealWithReps = DealListRowT;

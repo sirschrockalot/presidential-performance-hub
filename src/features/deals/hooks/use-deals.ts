@@ -12,6 +12,7 @@ import {
   type DealListFilters,
 } from "@/features/deals/services/deals.service";
 import { useAuthz } from "@/lib/auth/authz-context";
+import { DASHBOARD_BUNDLE_QUERY_KEY_ROOT } from "@/features/dashboard/hooks/use-dashboard-bundle";
 import type { CreateDealInput, UpdateDealInput, UpdateDealStatusInput } from "@/features/deals/schemas/deal.schemas";
 import type { DealBulkImportInput } from "@/features/deals/schemas/deal-bulk-import.schemas";
 
@@ -58,6 +59,7 @@ export function useCreateDeal() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["deals"] });
       qc.invalidateQueries({ queryKey: ["deal-metrics"] });
+      qc.invalidateQueries({ queryKey: [DASHBOARD_BUNDLE_QUERY_KEY_ROOT], exact: false });
     },
   });
 }
@@ -70,6 +72,7 @@ export function useUpdateDeal(id: string) {
       qc.invalidateQueries({ queryKey: ["deal", id] });
       qc.invalidateQueries({ queryKey: ["deals"] });
       qc.invalidateQueries({ queryKey: ["deal-metrics"] });
+      qc.invalidateQueries({ queryKey: [DASHBOARD_BUNDLE_QUERY_KEY_ROOT], exact: false });
     },
   });
 }
@@ -82,6 +85,7 @@ export function useUpdateDealStatus(id: string) {
       qc.invalidateQueries({ queryKey: ["deal", id] });
       qc.invalidateQueries({ queryKey: ["deals"] });
       qc.invalidateQueries({ queryKey: ["deal-metrics"] });
+      qc.invalidateQueries({ queryKey: [DASHBOARD_BUNDLE_QUERY_KEY_ROOT], exact: false });
     },
   });
 }
@@ -104,6 +108,7 @@ export function useBulkImportDeals() {
       qc.invalidateQueries({ queryKey: ["deals"], exact: false });
       qc.invalidateQueries({ queryKey: ["deal"], exact: false });
       qc.invalidateQueries({ queryKey: ["deal-metrics"], exact: false });
+      qc.invalidateQueries({ queryKey: [DASHBOARD_BUNDLE_QUERY_KEY_ROOT], exact: false });
     },
   });
 }

@@ -1,19 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import { guardSessionActorWithTeamAndPermission } from "@/lib/auth/api-route-guard";
 
 import { pointsManualAdjustmentSchema } from "@/features/points/schemas";
 import { createManualPointAdjustment } from "@/features/points/server/points.queries";
+import { revalidatePointsReads } from "@/lib/cache/revalidation";
 
 export async function POST(req: Request) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  if (!roleHasPermission(user.roleCode, "points:manual_adjust")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardSessionActorWithTeamAndPermission("points:manual_adjust");
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   let body: unknown;
   try {
@@ -38,6 +35,7 @@ export async function POST(req: Request) {
       reason: string;
       dealId?: string | null;
     });
+    revalidatePointsReads();
     return NextResponse.json({ adjustmentId: created.adjustmentId });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to create points adjustment";

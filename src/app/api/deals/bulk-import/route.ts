@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getApiSessionUser } from "@/lib/auth/require-api-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import { guardApiSessionUserWithPermission } from "@/lib/auth/api-route-guard";
 import { dealBulkImportSchema } from "@/features/deals/schemas/deal-bulk-import.schemas";
 import { bulkImportDeals } from "@/features/deals/server/deal-bulk-import.service";
 import { revalidateDealReads } from "@/lib/cache/revalidation";
 
 export async function POST(req: Request) {
-  const actor = await getApiSessionUser();
-  if (!actor) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!roleHasPermission(actor.roleCode, "deal:create")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardApiSessionUserWithPermission("deal:create");
+  if (auth.ok === false) return auth.response;
+  const actor = auth.user;
 
   let body: unknown;
   try {

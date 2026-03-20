@@ -2,17 +2,19 @@ import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
 
 import { prisma } from "@/lib/db/prisma";
-import { getApiSessionUser } from "@/lib/auth/require-api-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import {
+  guardApiSessionUser,
+  guardApiSessionUserWithPermission,
+} from "@/lib/auth/api-route-guard";
 import { createDealSchema, listDealsQuerySchema } from "@/features/deals/schemas/deal.schemas";
 import { createDeal, listDeals } from "@/features/deals/server/deals.service";
 import { CACHE_TAGS, revalidateDealReads } from "@/lib/cache/revalidation";
+import { INVALID_DEAL_ASSIGNMENT_MESSAGE } from "@/features/deals/server/deal-assignment-invariants";
 
 export async function GET(req: Request) {
-  const actor = await getApiSessionUser();
-  if (!actor) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await guardApiSessionUser();
+  if (auth.ok === false) return auth.response;
+  const actor = auth.user;
 
   const { searchParams } = new URL(req.url);
   const raw = {
@@ -41,13 +43,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const actor = await getApiSessionUser();
-  if (!actor) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!roleHasPermission(actor.roleCode, "deal:create")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardApiSessionUserWithPermission("deal:create");
+  if (auth.ok === false) return auth.response;
+  const actor = auth.user;
 
   let body: unknown;
   try {
@@ -66,6 +64,10 @@ export async function POST(req: Request) {
     revalidateDealReads();
     return NextResponse.json({ deal });
   } catch (e) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === INVALID_DEAL_ASSIGNMENT_MESSAGE) {
+      return NextResponse.json({ error: msg }, { status: 400 });
+    }
     console.error(e);
     return NextResponse.json({ error: "Failed to create deal" }, { status: 500 });
   }

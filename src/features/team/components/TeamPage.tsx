@@ -60,7 +60,8 @@ const TEAM_OPTIONS: { value: TeamCode; label: string }[] = [
 ];
 
 function createRoleOptionsForActor(isAdmin: boolean) {
-  return isAdmin ? ROLE_OPTIONS : ROLE_OPTIONS.filter((r) => r.value !== "ADMIN");
+  if (isAdmin) return ROLE_OPTIONS;
+  return ROLE_OPTIONS.filter((r) => r.value === "REP" || r.value === "TRANSACTION_COORDINATOR");
 }
 
 export default function TeamPage() {

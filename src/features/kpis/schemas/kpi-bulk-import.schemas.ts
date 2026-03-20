@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import { weekStartingSchema } from "@/features/kpis/schemas/kpi.schemas";
+import {
+  MAX_KPI_IMPORT_WEEKS,
+  MAX_KPI_REPS_PER_TEAM_PER_WEEK,
+} from "@/lib/security/import-limits";
 
 const nonNegInt = z.coerce.number().int().min(0);
 
@@ -49,8 +53,14 @@ export const dispositionsRepImportSchema = z
 const kpiBulkImportWeekSchemaBase = z
   .object({
     weekStarting: weekStartingSchema,
-    acquisitions: z.array(acquisitionsRepImportSchema).default([]),
-    dispositions: z.array(dispositionsRepImportSchema).default([]),
+    acquisitions: z
+      .array(acquisitionsRepImportSchema)
+      .max(MAX_KPI_REPS_PER_TEAM_PER_WEEK)
+      .default([]),
+    dispositions: z
+      .array(dispositionsRepImportSchema)
+      .max(MAX_KPI_REPS_PER_TEAM_PER_WEEK)
+      .default([]),
   })
   .strict();
 
@@ -61,7 +71,10 @@ export const kpiBulkImportWeekSchema = kpiBulkImportWeekSchemaBase.refine(
 
 export const kpiBulkImportSchema = z
   .object({
-    weeks: z.array(kpiBulkImportWeekSchema).min(1),
+    weeks: z
+      .array(kpiBulkImportWeekSchema)
+      .min(1)
+      .max(MAX_KPI_IMPORT_WEEKS, `At most ${MAX_KPI_IMPORT_WEEKS} weeks per request`),
   })
   .strict();
 

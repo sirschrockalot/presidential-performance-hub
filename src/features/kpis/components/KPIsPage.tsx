@@ -1,25 +1,17 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState, useMemo, useEffect } from "react";
+import { motion } from "motion/react";
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { MetricCard } from '@/components/shared/MetricCard';
-import {
-  useKpiEntries,
-  useKpiWeeks,
-  useKpiTrend,
-  useKpiWeekSummary,
-  useKpiTargets,
-  useKpiHistory,
-  useKpiFormUsers,
-  useUpsertKpiEntry,
-} from '@/features/kpis/hooks/use-kpis';
+import { useKpiPageBundle, useUpsertKpiEntry } from '@/features/kpis/hooks/use-kpis';
 import { Team } from '@/types';
 import { Phone, Clock, FileText, TrendingUp, Plus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { LoadingState } from '@/components/shared/LoadingState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -48,6 +40,32 @@ import {
   kpiHitBadgeVariant,
 } from "@/features/kpis/lib/kpi-compliance";
 import type { KpiTeam } from "@/features/kpis/lib/kpi-compliance";
+
+const KpiTrendEChart = dynamic(
+  () => import("@/features/kpis/components/KpiTrendEChart").then((m) => m.KpiTrendEChart),
+  {
+    ssr: false,
+    loading: () => <div className="h-[280px] w-full rounded-md bg-muted/40 animate-pulse" aria-hidden />,
+  }
+);
+
+const KpiTeamComplianceStripLazy = dynamic(
+  () => import("@/features/kpis/components/KpiTeamComplianceStrip").then((m) => m.KpiTeamComplianceStrip),
+  {
+    ssr: false,
+    loading: () => <div className="h-40 rounded-lg border bg-muted/30 animate-pulse" aria-hidden />,
+  }
+);
+
+const KpiWeeklySummaryCardLazy = dynamic(
+  () => import("@/features/kpis/components/KpiWeeklySummaryCard").then((m) => m.KpiWeeklySummaryCard),
+  {
+    ssr: false,
+    loading: () => <div className="h-32 rounded-lg border bg-muted/30 animate-pulse" aria-hidden />,
+  }
+);
+
+const kpiMotionEase = [0.22, 1, 0.36, 1] as const;
 
 type KpiEntryNumericField =
   | "dials"
@@ -277,52 +295,42 @@ export default function KPIsPage() {
     }
   }, [allowedTeams, team]);
 
-  const { data: weeks } = useKpiWeeks(team);
+  const { data: bundle, isPending: bundlePending } = useKpiPageBundle(team, week);
 
-  const prevWeekStarting = useMemo(() => {
-    if (!weeks?.length) return week;
+  const weeks = bundle?.weeks ?? [];
+
+  const prevWeekDerived = useMemo(() => {
+    if (!weeks.length) return week;
     const idx = weeks.indexOf(week);
     if (idx === -1) return week;
     return weeks[idx + 1] ?? week;
   }, [weeks, week]);
+  const prevWeekStarting = bundle ? bundle.prevWeekStarting : prevWeekDerived;
 
-  // Load both teams so the weekly deterministic text summary can always cover
-  // Acquisitions + Dispositions, even when the tab is on only one team.
-  const {
-    data: acquisitionsEntries,
-    isLoading: isLoadingAcqEntries,
-  } = useKpiEntries("acquisitions", week);
-  const {
-    data: dispositionsEntries,
-    isLoading: isLoadingDispoEntries,
-  } = useKpiEntries("dispositions", week);
+  const acquisitionsEntries = bundle?.entries?.acquisitions?.current;
+  const dispositionsEntries = bundle?.entries?.dispositions?.current;
+  const acquisitionsPrevEntries = bundle?.entries?.acquisitions?.previous;
+  const dispositionsPrevEntries = bundle?.entries?.dispositions?.previous;
 
-  const {
-    data: acquisitionsPrevEntries,
-    isLoading: isLoadingAcqPrevEntries,
-  } = useKpiEntries("acquisitions", prevWeekStarting);
-  const {
-    data: dispositionsPrevEntries,
-    isLoading: isLoadingDispoPrevEntries,
-  } = useKpiEntries("dispositions", prevWeekStarting);
+  const { data: entries, isLoading } =
+    team === "acquisitions"
+      ? { data: acquisitionsEntries, isLoading: bundlePending && acquisitionsEntries === undefined }
+      : { data: dispositionsEntries, isLoading: bundlePending && dispositionsEntries === undefined };
 
-  const { data: entries, isLoading } = team === "acquisitions"
-    ? { data: acquisitionsEntries, isLoading: isLoadingAcqEntries }
-    : { data: dispositionsEntries, isLoading: isLoadingDispoEntries };
+  const summary = bundle?.summary;
+  const trendData = bundle?.trendPoints;
+  const acquisitionsTargets = bundle?.targets?.acquisitions;
+  const dispositionsTargets = bundle?.targets?.dispositions;
+  const { data: targets } =
+    team === "acquisitions"
+      ? { data: acquisitionsTargets }
+      : { data: dispositionsTargets };
 
-  const { data: summary } = useKpiWeekSummary(team, week);
-  const { data: trendData } = useKpiTrend(team);
-  const { data: acquisitionsTargets } = useKpiTargets("acquisitions");
-  const { data: dispositionsTargets } = useKpiTargets("dispositions");
-  const { data: targets } = team === "acquisitions"
-    ? { data: acquisitionsTargets }
-    : { data: dispositionsTargets };
-
-  const { data: repUsers } = useKpiFormUsers(team);
-  const { data: history } = useKpiHistory(team);
+  const repUsers = bundle?.formUsers;
+  const history = bundle?.history;
 
   useEffect(() => {
-    if (!weeks?.length) return;
+    if (!weeks.length) return;
     if (weeks.includes(week)) return;
     setWeek(weeks[0]);
   }, [weeks, week]);
@@ -501,18 +509,25 @@ export default function KPIsPage() {
     <div className="space-y-6 max-w-[1440px] mx-auto">
       <PageHeader title="KPI Tracking" description="Weekly performance metrics by team">
         <div className="flex items-center gap-2">
-          <Select value={week} onValueChange={setWeek}>
-            <SelectTrigger className="w-40 h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {weeks?.map((w) => (
-                <SelectItem key={w} value={w}>
-                  Week of {formatWeekLabel(w)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {weeks.length > 0 ? (
+            <Select
+              value={weeks.includes(week) ? week : weeks[0]}
+              onValueChange={setWeek}
+            >
+              <SelectTrigger className="w-40 h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {weeks.map((w) => (
+                  <SelectItem key={w} value={w}>
+                    Week of {formatWeekLabel(w)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="w-40 h-9 rounded-md bg-muted/60 animate-pulse" aria-hidden />
+          )}
           {weeklySummaryCopyText && (
             <Button
               size="sm"
@@ -588,116 +603,58 @@ export default function KPIsPage() {
         </div>
 
         <TabsContent value={team} className="space-y-6 mt-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <MetricCard title="Total Dials" value={summary?.totalDials ?? 0} icon={Phone} />
-            <MetricCard
-              title="Talk Time"
-              value={
-                summary
-                  ? `${Math.round(summary.totalTalkTime / 60)}h ${summary.totalTalkTime % 60}m`
-                  : '—'
-              }
-              icon={Clock}
-            />
-            <MetricCard title="Entries" value={summary?.repCount ?? 0} icon={FileText} subtitle="Reps reporting" />
-            <MetricCard
-              title="Revenue"
-              value={`$${(summary?.totalRevenue ?? 0).toLocaleString()}`}
-              icon={TrendingUp}
-              variant="success"
-            />
-          </div>
+          <motion.div
+            key={`metrics-${team}-${week}`}
+            className="grid grid-cols-2 lg:grid-cols-4 gap-4"
+            initial="hidden"
+            animate="show"
+            variants={{
+              hidden: { opacity: 0 },
+              show: {
+                opacity: 1,
+                transition: { staggerChildren: 0.06, delayChildren: 0.04 },
+              },
+            }}
+          >
+            <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: kpiMotionEase } } }}>
+              <MetricCard title="Total Dials" value={summary?.totalDials ?? 0} icon={Phone} />
+            </motion.div>
+            <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: kpiMotionEase } } }}>
+              <MetricCard
+                title="Talk Time"
+                value={
+                  summary
+                    ? `${Math.round(summary.totalTalkTime / 60)}h ${summary.totalTalkTime % 60}m`
+                    : '—'
+                }
+                icon={Clock}
+              />
+            </motion.div>
+            <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: kpiMotionEase } } }}>
+              <MetricCard title="Entries" value={summary?.repCount ?? 0} icon={FileText} subtitle="Reps reporting" />
+            </motion.div>
+            <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: kpiMotionEase } } }}>
+              <MetricCard
+                title="Revenue"
+                value={`$${(summary?.totalRevenue ?? 0).toLocaleString()}`}
+                icon={TrendingUp}
+                variant="success"
+              />
+            </motion.div>
+          </motion.div>
 
-          {/* Team compliance strip */}
-          {(acqTeamCompliance || dispoTeamCompliance) && (
-            <div className="rounded-lg border bg-card p-5 space-y-4">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-sm font-semibold">Team KPI Compliance</h3>
-                    <p className="text-xs text-muted-foreground">Week of {formatWeekLabel(week)}</p>
-                </div>
-                <div className="text-right text-xs text-muted-foreground">
-                  <div>Acq reps: {acqTeamCompliance?.totalRepsConsidered ?? 0}</div>
-                  <div>Dispo reps: {dispoTeamCompliance?.totalRepsConsidered ?? 0}</div>
-                </div>
-              </div>
+          <KpiTeamComplianceStripLazy
+            weekLabel={formatWeekLabel(week)}
+            motionEase={kpiMotionEase}
+            acqTeamCompliance={acqTeamCompliance}
+            dispoTeamCompliance={dispoTeamCompliance}
+            acqTeamCompliancePrev={acqTeamCompliancePrev}
+            dispoTeamCompliancePrev={dispoTeamCompliancePrev}
+          />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(
-                  [
-                    { team: "acquisitions" as const, data: acqTeamCompliance, prev: acqTeamCompliancePrev },
-                    { team: "dispositions" as const, data: dispoTeamCompliance, prev: dispoTeamCompliancePrev },
-                  ] as const
-                ).map(({ team: t, data, prev }) => {
-                  if (!data) return null;
-                  const overallPct = data.compliancePercent;
-                  const overallTone = overallPct >= 100 ? "bg-success/10 text-success border-success/30" : overallPct >= 50 ? "bg-warning/10 text-warning border-warning/30" : "bg-destructive/10 text-destructive border-destructive/30";
-
-                  const deltaForMetric = (metricKey: string) => {
-                    const cur = data.metrics.find((m) => m.metricKey === metricKey)?.hitRatePercent ?? 0;
-                    const pr = prev?.metrics.find((m) => m.metricKey === metricKey)?.hitRatePercent ?? 0;
-                    return cur - pr;
-                  };
-
-                  return (
-                    <div key={t} className={cn("rounded-lg border p-4", overallTone)}>
-                      <div className="flex items-center justify-between gap-3 mb-3">
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground capitalize">{t}</p>
-                          <p className="text-sm font-semibold font-mono">{overallPct.toFixed(0)}%</p>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground font-medium">
-                          {data.kpisHitCount}/{data.totalKpisTracked} hits
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        {data.metrics.map((m) => {
-                          const hitPct = m.hitRatePercent;
-                          const tone =
-                            hitPct >= 100
-                              ? "bg-success/15 text-success border-success/30"
-                              : hitPct >= 90
-                                ? "bg-warning/15 text-warning border-warning/30"
-                                : hitPct === 0
-                                  ? "bg-destructive/15 text-destructive border-destructive/30"
-                                  : "bg-destructive/15 text-destructive border-destructive/30";
-                          const delta = deltaForMetric(m.metricKey);
-                          const arrow = Math.abs(delta) < 0.5 ? "→" : delta > 0 ? "↑" : "↓";
-                          const label =
-                            m.metricKey === "OFFERS_MADE" ? `Offers (min): ${m.hitLabel} hit` : `${m.metricLabel}: ${m.hitLabel} hit`;
-                          return (
-                            <div key={m.metricKey} className={cn("flex items-center justify-between gap-3 rounded-md border px-3 py-2", tone)}>
-                              <p className="text-xs font-medium truncate">{label}</p>
-                              <p className="text-xs font-semibold font-mono flex items-center gap-2">
-                                {m.hitRatePercent.toFixed(0)}% {arrow}
-                              </p>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Deterministic weekly summary */}
-          {weeklySummaryText && (
-            <div className="rounded-lg border bg-card p-5 space-y-2">
-              <h3 className="text-sm font-semibold">Weekly KPI Summary</h3>
-              <div className="text-sm text-muted-foreground whitespace-pre-line">
-                {weeklySummaryText.acquisitionsRecap}
-                {"\n"}
-                {weeklySummaryText.dispositionsRecap}
-                {"\n\n"}
-                {weeklySummaryText.teamTakeaway}
-                {"\n\n"}
-                {weeklySummaryText.stretchFocusByRep.map((r) => `- ${r.text}`).join("\n")}
-              </div>
-            </div>
-          )}
+          {weeklySummaryText ? (
+            <KpiWeeklySummaryCardLazy weeklySummaryText={weeklySummaryText} />
+          ) : null}
 
           {/* Rep scorecards */}
           {isLoading ? (
@@ -975,39 +932,17 @@ export default function KPIsPage() {
             </div>
           )}
 
-          {/* Trend chart */}
-          <div className="rounded-lg border bg-card p-5">
+          {/* Trend chart (ECharts, code-split) */}
+          <motion.div
+            key={`trend-${team}`}
+            className="rounded-lg border bg-card p-5"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.32, ease: kpiMotionEase }}
+          >
             <h3 className="text-sm font-semibold mb-4">Performance Trend</h3>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={trendData ?? []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis dataKey="week" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                <Line name="Dials" type="monotone" dataKey="dials" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 3 }} />
-                <Line
-                  name="Dials Target"
-                  type="monotone"
-                  dataKey="dialsTarget"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth={1.5}
-                  strokeDasharray="6 6"
-                  dot={false}
-                />
-                <Line name="Revenue ($)" type="monotone" dataKey="revenue" stroke="hsl(var(--success))" strokeWidth={2} dot={{ r: 3 }} />
-                <Line
-                  name="Revenue Target"
-                  type="monotone"
-                  dataKey="revenueTarget"
-                  stroke="hsl(var(--success))"
-                  strokeWidth={1.5}
-                  strokeDasharray="6 6"
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+            <KpiTrendEChart data={trendData ?? []} />
+          </motion.div>
         </TabsContent>
       </Tabs>
     </div>

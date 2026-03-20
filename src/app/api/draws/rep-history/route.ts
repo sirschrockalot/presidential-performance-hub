@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
+import { guardSessionActorWithTeam } from "@/lib/auth/api-route-guard";
 
 import type { DrawActor } from "@/features/draws/server/draw-scope";
 import { listRepDrawHistory } from "@/features/draws/server/draws.service";
 import { drawRepHistoryQuerySchema } from "@/features/draws/schemas";
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await guardSessionActorWithTeam();
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const { searchParams } = new URL(req.url);
   const raw = { repId: searchParams.get("repId") ?? undefined };

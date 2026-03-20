@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import { guardSessionActorWithTeamAndPermission } from "@/lib/auth/api-route-guard";
 
 import { kpiBulkImportSchema } from "@/features/kpis/schemas/kpi-bulk-import.schemas";
 import { bulkImportKpis } from "@/features/kpis/server/kpi-bulk-import.service";
@@ -10,14 +9,9 @@ import type { KpiActor } from "@/features/kpis/server/kpi-scope";
 import { revalidateKpiReads } from "@/lib/cache/revalidation";
 
 export async function POST(req: Request) {
-  const user = await getCurrentUser();
-  if (!user?.roleCode || !user?.teamCode) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!roleHasPermission(user.roleCode, "kpi:new_entry")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardSessionActorWithTeamAndPermission("kpi:new_entry");
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   let body: unknown;
   try {

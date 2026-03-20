@@ -195,6 +195,8 @@ model Deal {
   @@index([acquisitionsRepId])
   @@index([dispoRepId])
   @@index([closedFundedDate])
+  /// Dashboard: funded revenue series + open-pipeline filters (`status` + date range).
+  @@index([status, closedFundedDate])
 }
 
 /// Immutable audit trail of deal status transitions.

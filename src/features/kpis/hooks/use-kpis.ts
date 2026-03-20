@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchKpiEntries,
   fetchKpiFormUsers,
@@ -10,8 +10,12 @@ import {
   upsertKpiEntryApi,
   bulkImportKpisApi,
 } from "@/features/kpis/services/placeholder/kpis.service";
+import { fetchKpiPageBundle } from "@/features/kpis/api/kpis-client";
 import { Team } from "@/types";
 import { useAuthz } from "@/lib/auth/authz-context";
+import { DASHBOARD_BUNDLE_QUERY_KEY_ROOT } from "@/features/dashboard/hooks/use-dashboard-bundle";
+
+export const KPI_PAGE_BUNDLE_QUERY_KEY_ROOT = "kpi-page-bundle";
 import type { UpsertKpiEntryInput } from "@/features/kpis/server/kpis.service";
 import type { KpiBulkImportInput } from "@/features/kpis/schemas/kpi-bulk-import.schemas";
 
@@ -21,6 +25,7 @@ export function useKpiEntries(team: Team, weekStarting?: string) {
     queryKey: ["kpi-entries", team, weekStarting],
     queryFn: () => fetchKpiEntries(team, weekStarting),
     enabled: status === "authenticated",
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -39,6 +44,7 @@ export function useKpiTrend(team: Team) {
     queryKey: ["kpi-trend", team],
     queryFn: () => getKpiTrend(team),
     enabled: status === "authenticated",
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -48,6 +54,7 @@ export function useKpiWeekSummary(team: Team, weekStarting: string) {
     queryKey: ["kpi-summary", team, weekStarting],
     queryFn: () => getWeekSummary(team, weekStarting),
     enabled: status === "authenticated",
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -78,6 +85,17 @@ export function useKpiFormUsers(team: Team) {
   });
 }
 
+/** Single request for KPI tracking page initial + team/week changes (replaces fan-out of reads). */
+export function useKpiPageBundle(team: Team, weekStarting: string) {
+  const { status } = useAuthz();
+  return useQuery({
+    queryKey: [KPI_PAGE_BUNDLE_QUERY_KEY_ROOT, team, weekStarting],
+    queryFn: () => fetchKpiPageBundle(team, weekStarting),
+    enabled: status === "authenticated" && !!weekStarting,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useUpsertKpiEntry() {
   const qc = useQueryClient();
   return useMutation({
@@ -89,6 +107,8 @@ export function useUpsertKpiEntry() {
       qc.invalidateQueries({ queryKey: ["kpi-trend"], exact: false });
       qc.invalidateQueries({ queryKey: ["kpi-targets"], exact: false });
       qc.invalidateQueries({ queryKey: ["kpi-history"], exact: false });
+      qc.invalidateQueries({ queryKey: [KPI_PAGE_BUNDLE_QUERY_KEY_ROOT], exact: false });
+      qc.invalidateQueries({ queryKey: [DASHBOARD_BUNDLE_QUERY_KEY_ROOT], exact: false });
     },
   });
 }
@@ -104,6 +124,8 @@ export function useBulkImportKpis() {
       qc.invalidateQueries({ queryKey: ["kpi-trend"], exact: false });
       qc.invalidateQueries({ queryKey: ["kpi-targets"], exact: false });
       qc.invalidateQueries({ queryKey: ["kpi-history"], exact: false });
+      qc.invalidateQueries({ queryKey: [KPI_PAGE_BUNDLE_QUERY_KEY_ROOT], exact: false });
+      qc.invalidateQueries({ queryKey: [DASHBOARD_BUNDLE_QUERY_KEY_ROOT], exact: false });
     },
   });
 }

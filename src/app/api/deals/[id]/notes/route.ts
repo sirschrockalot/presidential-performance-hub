@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getApiSessionUser } from "@/lib/auth/require-api-user";
+import { guardApiSessionUser } from "@/lib/auth/api-route-guard";
 import { addDealNoteSchema } from "@/features/deals/schemas/deal.schemas";
 import { addDealNote } from "@/features/deals/server/deals.service";
 import { revalidateDealReads } from "@/lib/cache/revalidation";
@@ -9,10 +9,9 @@ import { revalidateDealReads } from "@/lib/cache/revalidation";
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function POST(req: Request, { params }: RouteParams) {
-  const actor = await getApiSessionUser();
-  if (!actor) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await guardApiSessionUser();
+  if (auth.ok === false) return auth.response;
+  const actor = auth.user;
 
   const { id } = await params;
 

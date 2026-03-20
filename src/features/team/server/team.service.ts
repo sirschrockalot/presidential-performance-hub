@@ -5,6 +5,7 @@ import { USER_ROLE_CODE_TO_UI, TEAM_CODE_TO_UI } from "@/domain/prisma-enums";
 import type { TeamMemberDto } from "@/features/team/types/team.types";
 import type { UserRole, Team } from "@/types";
 import { writeAuditLog } from "@/lib/audit/audit-log";
+import { assertCreatableTeamMemberRole } from "@/lib/security/team-role-invariants";
 
 export type TeamActor = {
   id: string;
@@ -137,9 +138,7 @@ export async function createTeamMember(
 ): Promise<TeamMemberDto> {
   const email = input.email.toLowerCase().trim();
 
-  if (actor.roleCode !== "ADMIN" && input.roleCode === "ADMIN") {
-    throw new Error("Forbidden");
-  }
+  assertCreatableTeamMemberRole(actor.roleCode, input.roleCode);
 
   let teamCode = input.teamCode;
   if (actor.roleCode !== "ADMIN") {

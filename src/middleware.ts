@@ -3,8 +3,31 @@ import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 /**
+ * Must match Auth.js cookie naming: `__Secure-authjs.session-token` only when cookies are `secure`.
+ * `NODE_ENV === "production"` alone is wrong for `next start` on http://localhost — the browser gets
+ * `authjs.session-token` (no prefix), while middleware was looking for the __Secure- name → stuck on login.
+ */
+function sessionCookieUsesSecureFlag(req: NextRequest): boolean {
+  const override = process.env.AUTH_COOKIE_SECURE?.toLowerCase();
+  if (override === "true") return true;
+  if (override === "false") return false;
+
+  const forwarded = req.headers.get("x-forwarded-proto");
+  if (forwarded) {
+    const first = forwarded.split(",")[0]?.trim().toLowerCase();
+    return first === "https";
+  }
+  return req.nextUrl.protocol === "https:";
+}
+
+/**
  * Edge-safe route protection: JWT only (no Prisma).
- * Authorization rules live in `src/lib/auth/permissions.ts` + feature guards.
+ *
+ * **API routes (`/api/*`) are not authenticated here** — each handler must call
+ * `guardApiSessionUser`, `guardSessionActor`, or equivalent (see `src/lib/auth/api-route-guard.ts`
+ * and `docs/SECURITY.md`). Exceptions: public routes like `/api/auth/*`, `/api/health`.
+ *
+ * Authorization rules live in `src/lib/auth/permissions.ts` + feature service invariants.
  */
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -16,7 +39,7 @@ export async function middleware(req: NextRequest) {
   const token = await getToken({
     req,
     secret: process.env.AUTH_SECRET,
-    secureCookie: process.env.NODE_ENV === "production",
+    secureCookie: sessionCookieUsesSecureFlag(req),
   });
 
   const loggedIn = !!token;

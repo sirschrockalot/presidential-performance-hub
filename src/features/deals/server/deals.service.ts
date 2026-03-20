@@ -1,14 +1,18 @@
-import type { PrismaClient } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient, TeamCode, UserRoleCode } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 
 import { DEAL_STATUS_FROM_UI, DEAL_STATUS_TO_UI, DRAW_STATUS_TO_UI } from "@/domain/prisma-enums";
 import type { DealStatus as UiDealStatus } from "@/types";
 import type { CreateDealInput, ListDealsQuery, UpdateDealInput, UpdateDealStatusInput } from "@/features/deals/schemas/deal.schemas";
+import {
+  loadActorTeamCode,
+  resolveValidatedDealAssignments,
+} from "@/features/deals/server/deal-assignment-invariants";
 import { dealWhereForScope, type DealActor } from "@/features/deals/server/deal-scope";
 import { writeAuditLog } from "@/lib/audit/audit-log";
 import { syncPointsForDealFundingTransition } from "@/features/points/server/points.engine";
 import { calculatePoints, calculateTcPoints } from "@/features/points/server/points-calculator";
+import { computeAssignmentFee, resolvedAssignmentFeeOrCompute } from "@/features/deals/utils/assignment-fee";
 
 const dealListInclude = {
   acquisitionsRep: { select: { id: true, name: true } },
@@ -51,6 +55,16 @@ function dateOnly(d: Date | null | undefined): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+/** Minimal deal row for the dashboard “recent deals” widget (smaller payload than `DealListRow`). */
+export type DashboardRecentDealRow = {
+  id: string;
+  propertyAddress: string;
+  acquisitionsRepName: string;
+  status: UiDealStatus;
+  /** Effective assignment fee / spread (same rules as full deal list). */
+  assignmentFee: number | null;
+};
+
 export type DealListRow = {
   id: string;
   propertyAddress: string;
@@ -83,9 +97,12 @@ export type DealListRow = {
 function mapDealListRow(
   deal: Prisma.DealGetPayload<{ include: typeof dealListInclude }>
 ): DealListRow {
-  const assignmentFeeNum = num(deal.assignmentFee);
-  const fallbackMargin = deal.assignmentPrice != null ? Number(deal.assignmentPrice) - Number(deal.contractPrice) : null;
-  const margin = assignmentFeeNum ?? fallbackMargin;
+  const margin = resolvedAssignmentFeeOrCompute(
+    n(deal.contractPrice),
+    num(deal.assignmentPrice),
+    num(deal.assignmentFee),
+    0
+  );
 
   const repPoints = margin != null ? calculatePoints(margin) : 0;
   const tcPoints = deal.transactionCoordinatorId ? calculateTcPoints() : 0;
@@ -107,7 +124,7 @@ function mapDealListRow(
     closedFundedDate: dateOnly(deal.closedFundedDate),
     contractPrice: n(deal.contractPrice),
     assignmentPrice: num(deal.assignmentPrice),
-    assignmentFee: assignmentFeeNum,
+    assignmentFee: margin,
     margin,
     buyerEmdAmount: num(deal.buyerEmdAmount),
     buyerEmdReceived: deal.buyerEmdReceived,
@@ -164,6 +181,8 @@ export type DealPointEventDto = {
 };
 
 export type DealDetailDto = DealListRow & {
+  /** Raw `assignmentFee` from DB (same as displayed fee when set). */
+  storedAssignmentFee: number | null;
   notes: DealNoteDto[];
   statusHistory: DealStatusHistoryDto[];
   draws: DealDrawDto[];
@@ -176,6 +195,7 @@ function mapDetail(
   const base = mapDealListRow(deal);
   return {
     ...base,
+    storedAssignmentFee: num(deal.assignmentFee),
     notes: deal.notes.map((note) => ({
       id: note.id,
       body: note.body,
@@ -229,6 +249,43 @@ function listOrderBy(q: ListDealsQuery): Prisma.DealOrderByWithRelationInput {
     default:
       return { updatedAt: dir };
   }
+}
+
+export async function listDashboardRecentDeals(
+  prisma: PrismaClient,
+  actor: DealActor,
+  limit: number
+): Promise<DashboardRecentDealRow[]> {
+  const deals = await prisma.deal.findMany({
+    where: dealWhereForScope(actor),
+    select: {
+      id: true,
+      propertyAddress: true,
+      contractPrice: true,
+      assignmentPrice: true,
+      assignmentFee: true,
+      status: true,
+      acquisitionsRep: { select: { name: true } },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: limit,
+  });
+
+  return deals.map((deal) => {
+    const margin = resolvedAssignmentFeeOrCompute(
+      n(deal.contractPrice),
+      num(deal.assignmentPrice),
+      num(deal.assignmentFee),
+      0
+    );
+    return {
+      id: deal.id,
+      propertyAddress: deal.propertyAddress,
+      acquisitionsRepName: deal.acquisitionsRep.name,
+      status: DEAL_STATUS_TO_UI[deal.status] as UiDealStatus,
+      assignmentFee: margin,
+    };
+  });
 }
 
 export async function listDeals(
@@ -290,15 +347,23 @@ export async function createDeal(
 ): Promise<DealDetailDto> {
   const prismaStatus = DEAL_STATUS_FROM_UI[input.status ?? "lead"];
 
+  const assignments = await resolveValidatedDealAssignments(
+    prisma,
+    actor,
+    input.acquisitionsRepId,
+    input.dispoRepId ?? null,
+    input.transactionCoordinatorId ?? null
+  );
+
   const deal = await prisma.$transaction(async (tx) => {
     const created = await tx.deal.create({
       data: {
         propertyAddress: input.propertyAddress.trim(),
         sellerName: input.sellerName.trim(),
         buyerName: input.buyerName?.trim() || null,
-        acquisitionsRepId: input.acquisitionsRepId,
-        dispoRepId: input.dispoRepId || null,
-        transactionCoordinatorId: input.transactionCoordinatorId || null,
+        acquisitionsRepId: assignments.acqId,
+        dispoRepId: assignments.dispoId,
+        transactionCoordinatorId: assignments.tcId,
         contractDate: parseDate(input.contractDate)!,
         assignedDate: parseDate(input.assignedDate ?? null),
         closedFundedDate: parseDate(input.closedFundedDate ?? null),
@@ -405,22 +470,49 @@ export async function updateDeal(
 ): Promise<DealDetailDto | null> {
   const existing = await prisma.deal.findFirst({
     where: { AND: [{ id }, dealWhereForScope(actor)] },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      status: true,
+      contractPrice: true,
+      assignmentPrice: true,
+      assignmentFee: true,
+      acquisitionsRepId: true,
+      dispoRepId: true,
+      transactionCoordinatorId: true,
+    },
   });
   if (!existing) return null;
+
+  const mergedAcq = input.acquisitionsRepId ?? existing.acquisitionsRepId;
+  const mergedDispo =
+    input.dispoRepId !== undefined ? input.dispoRepId : existing.dispoRepId;
+  const mergedTc =
+    input.transactionCoordinatorId !== undefined
+      ? input.transactionCoordinatorId
+      : existing.transactionCoordinatorId;
+
+  const assignments = await resolveValidatedDealAssignments(
+    prisma,
+    actor,
+    mergedAcq,
+    mergedDispo,
+    mergedTc
+  );
 
   const data: Prisma.DealUpdateInput = {};
 
   if (input.propertyAddress !== undefined) data.propertyAddress = input.propertyAddress.trim();
   if (input.sellerName !== undefined) data.sellerName = input.sellerName.trim();
   if (input.buyerName !== undefined) data.buyerName = input.buyerName?.trim() || null;
-  if (input.acquisitionsRepId !== undefined) data.acquisitionsRep = { connect: { id: input.acquisitionsRepId } };
+  if (input.acquisitionsRepId !== undefined) {
+    data.acquisitionsRep = { connect: { id: assignments.acqId } };
+  }
   if (input.dispoRepId !== undefined) {
-    data.dispoRep = input.dispoRepId ? { connect: { id: input.dispoRepId } } : { disconnect: true };
+    data.dispoRep = assignments.dispoId ? { connect: { id: assignments.dispoId } } : { disconnect: true };
   }
   if (input.transactionCoordinatorId !== undefined) {
-    data.transactionCoordinator = input.transactionCoordinatorId
-      ? { connect: { id: input.transactionCoordinatorId } }
+    data.transactionCoordinator = assignments.tcId
+      ? { connect: { id: assignments.tcId } }
       : { disconnect: true };
   }
   if (input.contractDate !== undefined) data.contractDate = parseDate(input.contractDate)!;
@@ -431,14 +523,36 @@ export async function updateDeal(
   if (input.assignmentPrice !== undefined) {
     data.assignmentPrice = input.assignmentPrice != null ? new Decimal(input.assignmentPrice) : null;
   }
-  if (input.assignmentFee !== undefined) {
-    data.assignmentFee = input.assignmentFee != null ? new Decimal(input.assignmentFee) : null;
-  }
   if (input.buyerEmdAmount !== undefined) {
     data.buyerEmdAmount = input.buyerEmdAmount != null ? new Decimal(input.buyerEmdAmount) : null;
   }
   if (input.buyerEmdReceived !== undefined) data.buyerEmdReceived = input.buyerEmdReceived;
   if (input.titleCompany !== undefined) data.titleCompany = input.titleCompany.trim();
+
+  const touchesFinancials =
+    input.contractPrice !== undefined ||
+    input.assignmentPrice !== undefined ||
+    input.additionalExpense !== undefined ||
+    input.assignmentFee !== undefined;
+
+  if (touchesFinancials) {
+    const nextContract =
+      input.contractPrice !== undefined ? input.contractPrice : n(existing.contractPrice);
+    const nextAp =
+      input.assignmentPrice !== undefined ? input.assignmentPrice : num(existing.assignmentPrice);
+    // Optional UI field: only deduct when the client sends a value (including null → 0).
+    // If the key is omitted (e.g. partial PATCH), treat as no additional expense — do not
+    // infer expense from the stored fee (that incorrectly reduced the spread).
+    const expenseForFormula =
+      input.additionalExpense !== undefined ? (input.additionalExpense ?? 0) : 0;
+
+    if (nextAp == null) {
+      data.assignmentFee = null;
+    } else {
+      const fee = computeAssignmentFee(nextContract, nextAp, expenseForFormula);
+      data.assignmentFee = fee != null ? new Decimal(fee) : null;
+    }
+  }
 
   if (Object.keys(data).length === 0) {
     return getDealById(prisma, actor, id);
@@ -574,14 +688,36 @@ export type DealMetricsDto = {
 };
 
 export async function getDealMetrics(prisma: PrismaClient, actor: DealActor): Promise<DealMetricsDto> {
-  const deals = await prisma.deal.findMany({
-    where: dealWhereForScope(actor),
-    select: { status: true, assignmentFee: true },
-  });
+  const whereScope = dealWhereForScope(actor);
 
-  const funded = deals.filter((d) => d.status === "CLOSED_FUNDED");
-  const active = deals.filter((d) => !["CLOSED_FUNDED", "CANCELED"].includes(d.status));
-  const totalRevenue = funded.reduce((s, d) => s + (d.assignmentFee ? n(d.assignmentFee) : 0), 0);
+  const [grouped, fundedDeals] = await Promise.all([
+    prisma.deal.groupBy({
+      by: ["status"],
+      where: whereScope,
+      _count: { _all: true },
+    }),
+    prisma.deal.findMany({
+      where: { ...whereScope, status: "CLOSED_FUNDED" },
+      select: { assignmentFee: true, contractPrice: true, assignmentPrice: true },
+    }),
+  ]);
+
+  const countByStatus = new Map(grouped.map((g) => [g.status, g._count._all]));
+  const totalDeals = grouped.reduce((s, g) => s + g._count._all, 0);
+  const fundedCount = countByStatus.get("CLOSED_FUNDED") ?? 0;
+  const canceledCount = countByStatus.get("CANCELED") ?? 0;
+  const activeCount = totalDeals - fundedCount - canceledCount;
+
+  let totalRevenue = 0;
+  for (const d of fundedDeals) {
+    const fee = resolvedAssignmentFeeOrCompute(
+      n(d.contractPrice),
+      num(d.assignmentPrice),
+      num(d.assignmentFee),
+      0
+    );
+    totalRevenue += fee ?? 0;
+  }
 
   const uiLabel: Record<string, string> = {
     LEAD: "Lead",
@@ -606,16 +742,16 @@ export async function getDealMetrics(prisma: PrismaClient, actor: DealActor): Pr
 
   const pipelineByStatus = pipelineOrder.map((st) => ({
     name: uiLabel[st],
-    count: deals.filter((d) => d.status === st).length,
+    count: countByStatus.get(st) ?? 0,
   }));
 
   return {
-    totalDeals: deals.length,
-    activeCount: active.length,
-    fundedCount: funded.length,
-    canceledCount: deals.filter((d) => d.status === "CANCELED").length,
+    totalDeals,
+    activeCount,
+    fundedCount,
+    canceledCount,
     totalRevenue,
-    avgFee: funded.length ? Math.round(totalRevenue / funded.length) : 0,
+    avgFee: fundedDeals.length ? Math.round(totalRevenue / fundedDeals.length) : 0,
     pipelineByStatus,
   };
 }
@@ -623,21 +759,62 @@ export async function getDealMetrics(prisma: PrismaClient, actor: DealActor): Pr
 export type AssignmentUserDto = {
   id: string;
   name: string;
-  email: string;
   roleCode: string;
   teamCode: string;
 };
 
-export async function listUsersForDealAssignment(prisma: PrismaClient): Promise<AssignmentUserDto[]> {
+type DealFormUsersActor = {
+  id: string;
+  roleCode: UserRoleCode;
+  teamCode?: TeamCode;
+};
+
+export async function listUsersForDealAssignment(
+  prisma: PrismaClient,
+  actor: DealFormUsersActor
+): Promise<AssignmentUserDto[]> {
+  const select = {
+    id: true,
+    name: true,
+    role: { select: { code: true } },
+    team: { select: { code: true } },
+  } as const;
+
+  let where: Prisma.UserWhereInput;
+
+  if (actor.roleCode === "ADMIN") {
+    where = { active: true };
+  } else if (actor.roleCode === "REP") {
+    const teamCode = actor.teamCode ?? (await loadActorTeamCode(prisma, { id: actor.id, roleCode: actor.roleCode, teamCode: actor.teamCode }));
+    const peerTeam: TeamCode | null = teamCode === "DISPOSITIONS" ? "ACQUISITIONS" : teamCode === "ACQUISITIONS" ? "DISPOSITIONS" : null;
+    where = {
+      active: true,
+      OR: [
+        { id: actor.id },
+        ...(peerTeam ? [{ team: { code: peerTeam } }] : []),
+        { role: { code: "TRANSACTION_COORDINATOR" } },
+      ],
+    };
+  } else {
+    where = {
+      active: true,
+      OR: [
+        { team: { code: "ACQUISITIONS" } },
+        { team: { code: "DISPOSITIONS" } },
+        { role: { code: "TRANSACTION_COORDINATOR" } },
+      ],
+    };
+  }
+
   const users = await prisma.user.findMany({
-    where: { active: true },
-    include: { role: true, team: true },
+    where,
+    select,
     orderBy: { name: "asc" },
   });
+
   return users.map((u) => ({
     id: u.id,
     name: u.name,
-    email: u.email,
     roleCode: u.role.code,
     teamCode: u.team.code,
   }));

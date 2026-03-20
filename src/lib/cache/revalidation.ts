@@ -14,6 +14,9 @@ export const CACHE_TAGS = {
   dealMetrics: "deal-metrics",
   dealDetail: "deal-detail",
   dealFormUsers: "deal-form-users",
+  drawMetrics: "draw-metrics",
+  pointsMetrics: "points-metrics",
+  pointsLeaderboard: "points-leaderboard",
   kpis: "kpis",
   kpiHistory: "kpi-history",
   kpiTrend: "kpi-trend",
@@ -27,6 +30,21 @@ export function revalidateDealReads() {
   revalidateTag(CACHE_TAGS.deals);
   revalidateTag(CACHE_TAGS.dealMetrics);
   revalidateTag(CACHE_TAGS.dealDetail);
+  revalidateTag(CACHE_TAGS.pointsMetrics);
+  revalidateTag(CACHE_TAGS.pointsLeaderboard);
+  revalidateTag(CACHE_TAGS.dashboard);
+}
+
+/** Draw requests / approvals affect draw metrics and dashboard widgets. */
+export function revalidateDrawReads() {
+  revalidateTag(CACHE_TAGS.drawMetrics);
+  revalidateTag(CACHE_TAGS.dashboard);
+}
+
+/** Manual point adjustments and other point writes (deal-funded events use revalidateDealReads). */
+export function revalidatePointsReads() {
+  revalidateTag(CACHE_TAGS.pointsMetrics);
+  revalidateTag(CACHE_TAGS.pointsLeaderboard);
   revalidateTag(CACHE_TAGS.dashboard);
 }
 

@@ -2,19 +2,18 @@ import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
 
 import { prisma } from "@/lib/db/prisma";
-import { getApiSessionUser } from "@/lib/auth/require-api-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import { guardApiSessionUser, guardApiSessionUserWithPermission } from "@/lib/auth/api-route-guard";
 import { updateDealSchema } from "@/features/deals/schemas/deal.schemas";
 import { getDealById, updateDeal } from "@/features/deals/server/deals.service";
 import { CACHE_TAGS, revalidateDealReads } from "@/lib/cache/revalidation";
+import { INVALID_DEAL_ASSIGNMENT_MESSAGE } from "@/features/deals/server/deal-assignment-invariants";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, { params }: RouteParams) {
-  const actor = await getApiSessionUser();
-  if (!actor) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await guardApiSessionUser();
+  if (auth.ok === false) return auth.response;
+  const actor = auth.user;
 
   const { id } = await params;
   const deal = await unstable_cache(
@@ -29,13 +28,9 @@ export async function GET(_req: Request, { params }: RouteParams) {
 }
 
 export async function PATCH(req: Request, { params }: RouteParams) {
-  const actor = await getApiSessionUser();
-  if (!actor) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!roleHasPermission(actor.roleCode, "deal:edit")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await guardApiSessionUserWithPermission("deal:edit");
+  if (auth.ok === false) return auth.response;
+  const actor = auth.user;
 
   const { id } = await params;
 
@@ -51,7 +46,15 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Validation failed", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const deal = await updateDeal(prisma, actor, id, parsed.data);
+  let deal;
+  try {
+    deal = await updateDeal(prisma, actor, id, parsed.data);
+  } catch (e) {
+    if (e instanceof Error && e.message === INVALID_DEAL_ASSIGNMENT_MESSAGE) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    throw e;
+  }
   if (!deal) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

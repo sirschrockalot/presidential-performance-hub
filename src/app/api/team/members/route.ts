@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
-import { roleHasPermission } from "@/lib/auth/permissions";
+import { guardSessionActorWithTeam, guardSessionActorWithTeamAndPermission } from "@/lib/auth/api-route-guard";
 
 import { listTeamMembers, createTeamMember } from "@/features/team/server/team.service";
 import type { TeamActor } from "@/features/team/server/team.service";
@@ -10,24 +9,17 @@ import { teamMutationHttpStatus } from "@/features/team/server/team-http";
 import { createTeamMemberSchema } from "@/features/team/schemas/team.schema";
 
 export async function GET() {
-  const user = await getCurrentUser();
-  if (!user?.roleCode || !user?.teamCode) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await guardSessionActorWithTeam();
+  if (auth.ok === false) return auth.response;
 
-  const actor: TeamActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
+  const actor: TeamActor = auth.user;
   const members = await listTeamMembers(prisma, actor);
   return NextResponse.json({ members });
 }
 
 export async function POST(req: Request) {
-  const user = await getCurrentUser();
-  if (!user?.roleCode || !user?.teamCode) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!roleHasPermission(user.roleCode, "team:add_member")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const teamAuth = await guardSessionActorWithTeamAndPermission("team:add_member");
+  if (teamAuth.ok === false) return teamAuth.response;
 
   let body: unknown;
   try {
@@ -41,7 +33,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Validation failed", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const actor: TeamActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
+  const actor: TeamActor = teamAuth.user;
 
   try {
     const member = await createTeamMember(prisma, actor, parsed.data);

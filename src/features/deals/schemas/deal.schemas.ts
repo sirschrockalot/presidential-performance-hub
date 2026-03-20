@@ -31,6 +31,13 @@ const optionalNonNegNumber = z.preprocess((v) => {
   return Number.isFinite(n) ? n : undefined;
 }, z.number().nonnegative().optional());
 
+/** For computed assignment fee (may be negative if assignment &lt; contract). */
+const optionalFiniteNumber = z.preprocess((v) => {
+  if (v === "" || v === null || v === undefined) return undefined;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}, z.number().finite().optional());
+
 const createDealBaseSchema = z.object({
   propertyAddress: z.string().min(1, "Property address is required"),
   sellerName: z.string().min(1, "Seller name is required"),
@@ -44,9 +51,9 @@ const createDealBaseSchema = z.object({
   inspectionEndDate: optionalDateString,
   contractPrice: z.coerce.number().nonnegative("Must be zero or positive"),
   assignmentPrice: optionalNonNegNumber.nullable(),
-  /** UI-only; stripped on parse. Assignment fee is always derived from prices + expense. */
+  /** UI-only; stripped on parse. Fee = assignment − contract [− additional expense if set]. */
   additionalExpense: optionalNonNegNumber.nullable().optional(),
-  assignmentFee: optionalNonNegNumber.nullable().optional(),
+  assignmentFee: optionalFiniteNumber.nullable().optional(),
   buyerEmdAmount: optionalNonNegNumber.nullable(),
   buyerEmdReceived: z.coerce.boolean().default(false),
   titleCompany: z.string().min(1, "Title company is required"),
@@ -79,7 +86,10 @@ export const updateDealSchema = z.object({
   inspectionEndDate: optionalDateString,
   contractPrice: z.coerce.number().nonnegative().optional(),
   assignmentPrice: optionalNonNegNumber.nullable().optional(),
-  assignmentFee: optionalNonNegNumber.nullable().optional(),
+  /** UI-only; omitted on PATCH means no additional expense when recomputing the fee. */
+  additionalExpense: optionalNonNegNumber.nullable().optional(),
+  /** Ignored on save — assignment fee is always recomputed from contract, assignment price, and expense. */
+  assignmentFee: optionalFiniteNumber.nullable().optional(),
   buyerEmdAmount: optionalNonNegNumber.nullable().optional(),
   buyerEmdReceived: z.coerce.boolean().optional(),
   titleCompany: z.string().min(1).optional(),
@@ -113,3 +123,11 @@ export const listDealsQuerySchema = z.object({
 });
 
 export type ListDealsQuery = z.infer<typeof listDealsQuerySchema>;
+
+/** Same shape as `GET /api/deals?sortBy=updatedAt&sortOrder=desc&limit=5` after `listDealsQuerySchema` parsing (dashboard recent deals). */
+export const dashboardRecentDealsListQuery = listDealsQuerySchema.parse({
+  status: "all",
+  sortBy: "updatedAt",
+  sortOrder: "desc",
+  limit: 5,
+});

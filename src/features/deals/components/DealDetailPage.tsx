@@ -48,6 +48,17 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 
+const assignmentFeeUsd = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 2,
+});
+
+function formatAssignmentFeeValue(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return assignmentFeeUsd.format(n);
+}
+
 const PIPELINE_STATUSES: DealStatus[] = [
   "lead",
   "under_contract",
@@ -287,9 +298,17 @@ export default function DealDetailPage() {
         />
         <MetricCard
           title="Assignment Fee"
-          value={deal.assignmentFee ? `$${deal.assignmentFee.toLocaleString()}` : "—"}
+          value={formatAssignmentFeeValue(deal.assignmentFee)}
           icon={TrendingUp}
-          variant={deal.assignmentFee ? "success" : "default"}
+          variant={
+            deal.assignmentFee == null
+              ? "default"
+              : deal.assignmentFee < 0
+                ? "warning"
+                : deal.assignmentFee > 0
+                  ? "success"
+                  : "default"
+          }
         />
         <MetricCard title="Margin" value={margin ? `${margin}%` : "—"} icon={Percent} />
         <MetricCard
@@ -365,8 +384,10 @@ export default function DealDetailPage() {
                 <InfoRow
                   label="Net After Draws"
                   value={
-                    deal.assignmentFee
-                      ? `$${(deal.assignmentFee - deal.draws.reduce((s, d) => s + d.amount, 0)).toLocaleString()}`
+                    deal.assignmentFee != null
+                      ? assignmentFeeUsd.format(
+                          deal.assignmentFee - deal.draws.reduce((s, d) => s + d.amount, 0)
+                        )
                       : "—"
                   }
                 />

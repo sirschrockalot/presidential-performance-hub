@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -70,6 +71,13 @@ export function DealCreateDialog({
     resolver: zodResolver(createDealSchema),
     defaultValues,
   });
+
+  /** Avoid a stale assignment fee from a previous session showing wrong numbers. */
+  useEffect(() => {
+    if (open) {
+      form.reset(defaultValues);
+    }
+  }, [open, form]);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {

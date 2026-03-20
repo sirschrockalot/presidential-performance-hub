@@ -7,8 +7,10 @@ import type {
   KpiTrendPointDto,
   KpiWeekSummaryDto,
 } from "@/features/kpis/server/kpis.service";
+import type { KpiPageBundleDto } from "@/features/kpis/server/kpi-page-bundle";
 
 export type { KpiEntryWithRepDto, KpiWeekSummaryDto, KpiTrendPointDto, KpiTargetsByMetricKey, KpiHistoryRowDto } from "@/features/kpis/server/kpis.service";
+export type { KpiPageBundleDto } from "@/features/kpis/server/kpi-page-bundle";
 
 import type { UpsertKpiEntryInput } from "@/features/kpis/server/kpis.service";
 
@@ -81,6 +83,13 @@ export async function fetchKpiFormUsers(team: Team): Promise<{ id: string; name:
   const res = await fetch(`/api/kpis/form-users${buildQuery({ team })}`, { credentials: "include" });
   const data = await parseJson<{ users: { id: string; name: string }[] }>(res);
   return data.users;
+}
+
+export async function fetchKpiPageBundle(team: Team, weekStarting: string): Promise<KpiPageBundleDto> {
+  const qs = buildQuery({ team, weekStarting });
+  const res = await fetch(`/api/kpis/bundle${qs}`, { credentials: "include" });
+  const data = await parseJson<{ bundle: KpiPageBundleDto }>(res);
+  return data.bundle;
 }
 
 export async function upsertKpiEntryApi(input: UpsertKpiEntryInput): Promise<{ entry: KpiEntryWithRepDto }> {

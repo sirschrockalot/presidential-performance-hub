@@ -1,3 +1,6 @@
+import type { DashboardRecentDealRow, DealMetricsDto } from "@/features/deals/server/deals.service";
+import type { PointsLeaderboardEntryDto, PointsMetricsDto } from "@/features/points/server/points.queries";
+
 export type DashboardOverviewDto = {
   fundedDealsThisMonth: number;
   totalAssignmentRevenueThisMonth: number;
@@ -35,6 +38,10 @@ export type DashboardOverviewDto = {
     openPipelineDeals: number;
     dealsWithPotentialProfit: number;
     totalPotentialAssignmentProfit: number;
+    /** Average effective assignment fee on open pipeline deals that have fee/spread data */
+    avgAssignmentFeePotential: number;
+    /** Distinct users with projected points (may exceed `potentialPointsByUser.length`, which is capped for payload). */
+    usersWithPotentialPointsCount: number;
     potentialPointsByUser: Array<{
       userId: string;
       userName: string;
@@ -114,6 +121,23 @@ export type DashboardOverviewDto = {
   };
 };
 
+/** Matches `getDrawMetrics` payload from draws service (dashboard / bundle only). */
+export type DrawMetricsBundleDto = {
+  outstanding: number;
+  pendingCount: number;
+  totalRecouped: number;
+  ineligibleCount: number;
+};
+
+export type DashboardBundleDto = {
+  overview: DashboardOverviewDto;
+  recentDeals: DashboardRecentDealRow[];
+  dealMetrics: DealMetricsDto;
+  drawMetrics: DrawMetricsBundleDto;
+  leaderboard: PointsLeaderboardEntryDto[];
+  pointsMetrics: PointsMetricsDto;
+};
+
 async function parseJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
@@ -129,5 +153,11 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewDto> {
   const res = await fetch("/api/dashboard/overview", { credentials: "include" });
   const json = await parseJson<{ overview: DashboardOverviewDto }>(res);
   return json.overview;
+}
+
+export async function fetchDashboardBundle(): Promise<DashboardBundleDto> {
+  const res = await fetch("/api/dashboard/bundle", { credentials: "include" });
+  const json = await parseJson<{ bundle: DashboardBundleDto }>(res);
+  return json.bundle;
 }
 

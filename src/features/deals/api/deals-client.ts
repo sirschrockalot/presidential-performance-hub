@@ -3,13 +3,14 @@ import type { CreateDealInput, UpdateDealInput, UpdateDealStatusInput } from "@/
 import type { DealBulkImportInput } from "@/features/deals/schemas/deal-bulk-import.schemas";
 import type {
   AssignmentUserDto,
+  DashboardRecentDealRow,
   DealDetailDto,
   DealListRow,
   DealMetricsDto,
 } from "@/features/deals/server/deals.service";
 import type { BulkImportDealsResult } from "@/features/deals/server/deal-bulk-import.service";
 
-export type { DealDetailDto, DealListRow, DealMetricsDto, AssignmentUserDto };
+export type { DealDetailDto, DealListRow, DealMetricsDto, AssignmentUserDto, DashboardRecentDealRow };
 
 export type DealListFilters = {
   search?: string;

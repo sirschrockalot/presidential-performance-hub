@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCurrentUser } from "@/lib/auth/current-user";
+import { guardSessionActorWithTeam } from "@/lib/auth/api-route-guard";
 
 import { listPointEvents } from "@/features/points/server/points.queries";
 import { pointsEventsQuerySchema } from "@/features/points/schemas";
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await guardSessionActorWithTeam();
+  if (auth.ok === false) return auth.response;
+  const user = auth.user;
 
   const { searchParams } = new URL(req.url);
   const parsed = pointsEventsQuerySchema.safeParse({
