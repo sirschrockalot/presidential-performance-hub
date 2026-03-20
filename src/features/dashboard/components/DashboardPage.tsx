@@ -108,6 +108,69 @@ export default function DashboardPage() {
         <MetricCard title="Outstanding Draws" value={`$${(drawMetrics?.outstanding ?? 0).toLocaleString()}`} icon={Banknote} variant="warning" />
       </div>
 
+      <div className="rounded-lg border bg-card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-card-foreground">Potential Pipeline Value</h2>
+          <span className="text-xs text-muted-foreground">
+            Open deals: {overview.potentialPipeline.openPipelineDeals} · With fee data: {overview.potentialPipeline.dealsWithPotentialProfit}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+          <MetricCard
+            title="Potential Assignment Profit"
+            value={`$${overview.potentialPipeline.totalPotentialAssignmentProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+            icon={DollarSign}
+            subtitle="From open pipeline deals"
+            variant="success"
+          />
+          <MetricCard
+            title="Users With Potential Points"
+            value={overview.potentialPipeline.potentialPointsByUser.length}
+            icon={Trophy}
+            subtitle="Rep + TC projected points"
+            variant="info"
+          />
+          <MetricCard
+            title="Top Potential Points"
+            value={
+              overview.potentialPipeline.potentialPointsByUser[0]
+                ? `${overview.potentialPipeline.potentialPointsByUser[0].potentialPoints.toFixed(1)} pts`
+                : "0 pts"
+            }
+            icon={Star}
+            subtitle={overview.potentialPipeline.potentialPointsByUser[0]?.userName ?? "No projected recipients"}
+          />
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left py-2 px-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">User</th>
+                <th className="text-right py-2 px-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Potential Points</th>
+                <th className="text-right py-2 px-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Open Deals</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overview.potentialPipeline.potentialPointsByUser.slice(0, 8).map((row) => (
+                <tr key={row.userId} className="border-b last:border-b-0">
+                  <td className="py-2.5 px-3">{row.userName}</td>
+                  <td className="py-2.5 px-3 text-right font-medium">{row.potentialPoints.toFixed(1)}</td>
+                  <td className="py-2.5 px-3 text-right text-muted-foreground">{row.dealCount}</td>
+                </tr>
+              ))}
+              {overview.potentialPipeline.potentialPointsByUser.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="py-3 px-3 text-sm text-muted-foreground">
+                    No projected points yet. Add assignment fee or assignment/contract prices on open deals.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <DashboardCharts metrics={metrics} overview={overview} />
       </div>

@@ -49,6 +49,7 @@ import { reportsDatePresetSchema } from "@/features/reports/schemas";
 import type { ReportsFiltersUi } from "@/features/reports/api/reports-client";
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-5))", "hsl(var(--chart-3))"];
+const ALL_REPS_VALUE = "__all_reps__";
 
 export default function ReportsPage() {
   const { can } = useAuthz();
@@ -350,12 +351,12 @@ export default function ReportsPage() {
               <SelectItem value="ytd">Year to Date</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={repId ?? ""} onValueChange={(v) => setRepId(v || null)}>
+          <Select value={repId ?? ALL_REPS_VALUE} onValueChange={(v) => setRepId(v === ALL_REPS_VALUE ? null : v)}>
             <SelectTrigger className="w-44 h-9">
               <SelectValue placeholder="Rep filter" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All reps</SelectItem>
+              <SelectItem value={ALL_REPS_VALUE}>All reps</SelectItem>
               {(data.filterOptions.repOptions ?? []).map((o) => (
                 <SelectItem key={o.value} value={o.value}>
                   {o.label}

@@ -36,6 +36,13 @@ const STATUS_ALIASES: Record<string, DealUiStatus> = {
   cancelled: "canceled",
 };
 
+// Temporary import aliases coming from external deal export handles.
+const IMPORT_REP_ALIASES: Record<string, string> = {
+  pparsons: "patrick",
+  canthony: "joel",
+  cwiegand: "joel",
+};
+
 function normalizeName(name: string): string {
   return name
     .trim()
@@ -45,11 +52,44 @@ function normalizeName(name: string): string {
     .trim();
 }
 
+function emailPrefix(email: string): string {
+  return email.split("@")[0]?.trim().toLowerCase() ?? "";
+}
+
 function toDateOnlyOrNull(input: string | null): string | null {
   if (!input) return null;
-  const d = new Date(input);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
+  const raw = input.trim();
+  if (!raw) return null;
+
+  // Already ISO date.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  // Support YYYY/MM/DD.
+  let m = raw.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
+      return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+  }
+
+  // Support M/D/YYYY or MM/DD/YY.
+  m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  if (m) {
+    let y = Number(m[3]);
+    if (m[3].length === 2) y += y >= 70 ? 1900 : 2000;
+    const mo = Number(m[1]);
+    const d = Number(m[2]);
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
+      return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
 }
 
 function normalizeStatus(input: string | null): DealUiStatus {
@@ -88,6 +128,7 @@ type NormalizedDealImportRow = {
   closedFundedDate: string | null;
   contractPrice: number;
   assignmentPrice: number | null;
+  assignmentFee: number | null;
   buyerEmdAmount: number | null;
   status: DealUiStatus;
   initialNote: string | null;
@@ -117,6 +158,7 @@ function normalizeRow(row: DealImportRow): { data: NormalizedDealImportRow | nul
       closedFundedDate: toDateOnlyOrNull(row.closingDate),
       contractPrice,
       assignmentPrice: row.salePrice,
+      assignmentFee: row.assignmentFee,
       buyerEmdAmount: row.emdAmount,
       status: normalizeStatus(row.status),
       initialNote: row.notes ?? null,
@@ -131,10 +173,33 @@ export async function bulkImportDeals(
 ): Promise<BulkImportDealsResult> {
   const users = await prisma.user.findMany({
     where: { active: true },
-    select: { id: true, name: true },
+    select: { id: true, name: true, email: true },
   });
 
-  const userPool = users.map((u) => ({ id: u.id, normalizedName: normalizeName(u.name) }));
+  const userPool = users.map((u) => ({
+    id: u.id,
+    normalizedName: normalizeName(u.name),
+    emailPrefix: emailPrefix(u.email),
+    compactInitialLast: normalizeName(u.name).split(" ").length >= 2
+      ? `${normalizeName(u.name).split(" ")[0][0] ?? ""}${normalizeName(u.name).split(" ").at(-1) ?? ""}`
+      : "",
+  }));
+
+  const resolveUserMatches = (rawName: string) => {
+    const initialNeedle = normalizeName(rawName);
+    const aliasExpanded = IMPORT_REP_ALIASES[initialNeedle] ?? initialNeedle;
+    const needle = aliasExpanded;
+    const needleCompact = needle.replace(/\s+/g, "");
+    if (!needle) return [];
+
+    return userPool.filter((u) => {
+      if (u.normalizedName === needle) return true;
+      if (u.normalizedName.startsWith(`${needle} `)) return true;
+      if (u.emailPrefix === needleCompact) return true;
+      if (u.compactInitialLast === needleCompact) return true;
+      return false;
+    });
+  };
 
   const errors: BulkImportDealsError[] = [];
   let imported = 0;
@@ -156,10 +221,7 @@ export async function bulkImportDeals(
       continue;
     }
 
-    const acqNeedle = normalizeName(normalized.data.acquisitionsRepName);
-    const acqMatches = userPool.filter((u) => {
-      return u.normalizedName === acqNeedle || u.normalizedName.startsWith(`${acqNeedle} `);
-    });
+    const acqMatches = resolveUserMatches(normalized.data.acquisitionsRepName);
     if (acqMatches.length === 0) {
       errors.push({
         code: "UNKNOWN_ACQ_REP",
@@ -181,10 +243,7 @@ export async function bulkImportDeals(
       continue;
     }
 
-    const dispoNeedle = normalized.data.dispoRepName ? normalizeName(normalized.data.dispoRepName) : null;
-    const dispoMatches = dispoNeedle
-      ? userPool.filter((u) => u.normalizedName === dispoNeedle || u.normalizedName.startsWith(`${dispoNeedle} `))
-      : [];
+    const dispoMatches = normalized.data.dispoRepName ? resolveUserMatches(normalized.data.dispoRepName) : [];
 
     const dispoRepId = dispoMatches.length === 1 ? dispoMatches[0].id : null;
 
@@ -216,7 +275,7 @@ export async function bulkImportDeals(
         inspectionEndDate: null,
         contractPrice: normalized.data.contractPrice,
         assignmentPrice: normalized.data.assignmentPrice,
-        assignmentFee: null,
+        assignmentFee: normalized.data.assignmentFee,
         buyerEmdAmount: normalized.data.buyerEmdAmount,
         buyerEmdReceived: Boolean(normalized.data.buyerEmdAmount && normalized.data.buyerEmdAmount > 0),
         titleCompany: "Unknown (Imported)",
@@ -237,6 +296,7 @@ export async function bulkImportDeals(
       closedFundedDate: normalized.data.closedFundedDate,
       contractPrice: normalized.data.contractPrice,
       assignmentPrice: normalized.data.assignmentPrice,
+      assignmentFee: normalized.data.assignmentFee,
       buyerEmdAmount: normalized.data.buyerEmdAmount,
       buyerEmdReceived: Boolean(normalized.data.buyerEmdAmount && normalized.data.buyerEmdAmount > 0),
       titleCompany: "Unknown (Imported)",

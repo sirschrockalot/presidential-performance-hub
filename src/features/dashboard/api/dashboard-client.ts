@@ -31,6 +31,17 @@ export type DashboardOverviewDto = {
     actor?: string;
   }[];
   teamSize: { active: number; inactive: number };
+  potentialPipeline: {
+    openPipelineDeals: number;
+    dealsWithPotentialProfit: number;
+    totalPotentialAssignmentProfit: number;
+    potentialPointsByUser: Array<{
+      userId: string;
+      userName: string;
+      potentialPoints: number;
+      dealCount: number;
+    }>;
+  };
   kpiDashboard?: {
     lastWeekStarting: string | null;
     previousWeekStarting: string | null;

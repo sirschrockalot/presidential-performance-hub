@@ -22,6 +22,7 @@ function formatMoney(amount: number): string {
 }
 
 export default function KpiHistoryPage() {
+  const ALL_WEEKS_VALUE = "__all_weeks__";
   const { user, roleCode } = useAuthz();
 
   const allowedTeams = useMemo((): Team[] => {
@@ -33,7 +34,7 @@ export default function KpiHistoryPage() {
   }, [roleCode, user?.teamCode]);
 
   const [team, setTeam] = useState<Team>("acquisitions");
-  const [weekFilter, setWeekFilter] = useState<string>(""); // optional client-side filter
+  const [weekFilter, setWeekFilter] = useState<string>(ALL_WEEKS_VALUE); // optional client-side filter
 
   useEffect(() => {
     if (!allowedTeams.includes(team)) setTeam(allowedTeams[0]);
@@ -48,7 +49,7 @@ export default function KpiHistoryPage() {
   }, [history]);
 
   const filtered = useMemo(() => {
-    if (!weekFilter) return history ?? [];
+    if (weekFilter === ALL_WEEKS_VALUE) return history ?? [];
     return (history ?? []).filter((h) => h.weekStarting === weekFilter);
   }, [history, weekFilter]);
 
@@ -125,7 +126,7 @@ export default function KpiHistoryPage() {
               <SelectValue placeholder="All weeks" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All weeks</SelectItem>
+              <SelectItem value={ALL_WEEKS_VALUE}>All weeks</SelectItem>
               {weeks.map((w) => (
                 <SelectItem key={w} value={w}>
                   Week of {w}

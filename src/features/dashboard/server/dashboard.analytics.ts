@@ -14,6 +14,7 @@ import { listKpiEntries, listKpiTargetsForTeam } from "@/features/kpis/server/kp
 
 import type { Team } from "@/types";
 import { computeKpiRepWeeklyCompliance, computeKpiTeamComplianceSummary, generateWeeklyKpiSummaryText } from "@/features/kpis/lib/kpi-compliance";
+import { calculatePoints, calculateTcPoints } from "@/features/points/server/points-calculator";
 
 type MonthlySeriesPoint = { month: string; revenue: number; fundedDeals?: number };
 type PointsTrendPoint = { month: string; points: number };
@@ -191,6 +192,61 @@ async function getCurrentMonthFundedDealStats(prisma: PrismaClient, actor: DealA
     fundedDealsThisMonth: agg._count.id,
     totalAssignmentRevenueThisMonth: agg._sum.assignmentFee ? Number(agg._sum.assignmentFee) : 0,
     avgAssignmentFeeThisMonth: agg._avg.assignmentFee ? Number(agg._avg.assignmentFee) : 0,
+  };
+}
+
+async function getPotentialPipelineValue(prisma: PrismaClient, actor: DealActor) {
+  const deals = await prisma.deal.findMany({
+    where: {
+      ...dealWhereForScope(actor),
+      status: { notIn: ["CLOSED_FUNDED", "CANCELED"] },
+    },
+    select: {
+      id: true,
+      assignmentFee: true,
+      assignmentPrice: true,
+      contractPrice: true,
+      acquisitionsRep: { select: { id: true, name: true } },
+      dispoRep: { select: { id: true, name: true } },
+      transactionCoordinator: { select: { id: true, name: true } },
+    },
+  });
+
+  const byUser = new Map<string, { userId: string; userName: string; potentialPoints: number; dealCount: number }>();
+  let totalPotentialAssignmentProfit = 0;
+  let dealsWithPotentialProfit = 0;
+
+  for (const d of deals) {
+    const fallbackFee =
+      d.assignmentPrice != null && d.contractPrice != null
+        ? Number(d.assignmentPrice) - Number(d.contractPrice)
+        : null;
+    const effectiveFee = d.assignmentFee != null ? Number(d.assignmentFee) : fallbackFee;
+    if (effectiveFee == null) continue;
+
+    totalPotentialAssignmentProfit += effectiveFee;
+    dealsWithPotentialProfit += 1;
+
+    const repPoints = calculatePoints(effectiveFee);
+    const tcPoints = calculateTcPoints();
+
+    const recipients: Array<{ id: string; name: string; points: number }> = [{ id: d.acquisitionsRep.id, name: d.acquisitionsRep.name, points: repPoints }];
+    if (d.dispoRep) recipients.push({ id: d.dispoRep.id, name: d.dispoRep.name, points: repPoints });
+    if (d.transactionCoordinator) recipients.push({ id: d.transactionCoordinator.id, name: d.transactionCoordinator.name, points: tcPoints });
+
+    for (const r of recipients) {
+      const current = byUser.get(r.id) ?? { userId: r.id, userName: r.name, potentialPoints: 0, dealCount: 0 };
+      current.potentialPoints += r.points;
+      current.dealCount += 1;
+      byUser.set(r.id, current);
+    }
+  }
+
+  return {
+    openPipelineDeals: deals.length,
+    dealsWithPotentialProfit,
+    totalPotentialAssignmentProfit,
+    potentialPointsByUser: Array.from(byUser.values()).sort((a, b) => b.potentialPoints - a.potentialPoints),
   };
 }
 
@@ -696,7 +752,7 @@ export async function getDashboardOverview(prisma: PrismaClient, actor: { id: st
     };
   })();
 
-  const [assignmentRevenueTrend, pointsTrend, weeklySnapshot, activity, teamSize, monthDealStats, kpiDashboard] = await Promise.all([
+  const [assignmentRevenueTrend, pointsTrend, weeklySnapshot, activity, teamSize, monthDealStats, kpiDashboard, potentialPipeline] = await Promise.all([
     getMonthlyDealRevenueSeries({ prisma, actor: dealActor, monthsBack: 6 }),
     getPointsTrendSeries({ prisma, actor, monthsBack: 6 }),
     getWeeklyKpiSnapshot(prisma, kpiActor),
@@ -737,6 +793,7 @@ export async function getDashboardOverview(prisma: PrismaClient, actor: { id: st
     })(),
     getCurrentMonthFundedDealStats(prisma, dealActor),
     kpiDashboardPromise,
+    getPotentialPipelineValue(prisma, dealActor),
   ]);
 
   return {
@@ -749,6 +806,7 @@ export async function getDashboardOverview(prisma: PrismaClient, actor: { id: st
     recentActivity: activity,
     teamSize,
     kpiDashboard,
+    potentialPipeline,
   };
 }
 
