@@ -69,6 +69,13 @@ enum ReportingPeriodKind {
   QUARTERLY
 }
 
+enum KpiDataSource {
+  AIRCALL
+  MANUAL
+  IMPORT
+  SYSTEM
+}
+
 // ---------------------------------------------------------------------------
 // Identity & org
 // ---------------------------------------------------------------------------
@@ -94,9 +101,10 @@ model Team {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  users     User[]
-  kpiEntries KpiEntry[]
-  kpiTargets KpiTarget[]
+  users           User[]
+  kpiEntries      KpiEntry[]
+  kpiTargets      KpiTarget[]
+  dailyKpiEntries DailyKpiEntry[]
 }
 
 model User {
@@ -126,6 +134,7 @@ model User {
   dealsAsTc          Deal[] @relation("DealTransactionCoordinator")
 
   kpiEntries         KpiEntry[]
+  dailyKpiEntries    DailyKpiEntry[]
   drawsAsRep         Draw[]
   drawsApproved      Draw[]           @relation("DrawApprovedBy")
   pointEventsReceived PointEvent[]    @relation("PointEventRecipient")
@@ -306,6 +315,31 @@ model KpiTarget {
 
   @@index([teamId, metricKey])
   @@index([reportingPeriodId])
+}
+
+model DailyKpiEntry {
+  id                      String        @id @default(cuid())
+  userId                  String
+  user                    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId                  String
+  team                    Team          @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  entryDate               DateTime      @db.Date
+  source                  KpiDataSource
+  dials                   Int           @default(0)
+  talkTimeMinutes         Int           @default(0)
+  inboundTalkTimeMinutes  Int           @default(0)
+  outboundTalkTimeMinutes Int           @default(0)
+  offersMade              Int?
+  contractsSigned         Int?
+  rawPayload              Json?
+  externalRef             String?
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  @@unique([userId, teamId, entryDate, source])
+  @@index([entryDate])
+  @@index([teamId, entryDate])
+  @@index([userId, entryDate])
 }
 
 // ---------------------------------------------------------------------------

@@ -11,8 +11,10 @@ import {
   useKpiTrend,
   useKpiWeekSummary,
   useKpiTargets,
+  useKpiHistory,
   useKpiFormUsers,
   useUpsertKpiEntry,
+  useBulkImportKpis,
 } from '@/features/kpis/hooks/use-kpis';
 import { Team } from '@/types';
 import { Phone, Clock, FileText, TrendingUp, Plus } from 'lucide-react';
@@ -22,7 +24,11 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { LoadingState } from '@/components/shared/LoadingState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from "@/lib/utils";
 import type { KpiEntryWithRepDto, UpsertKpiEntryInput } from '@/features/kpis/server/kpis.service';
+import type { BulkImportKpisResult } from '@/features/kpis/server/kpi-bulk-import.service';
+import type { KpiBulkImportInput } from "@/features/kpis/schemas/kpi-bulk-import.schemas";
 import {
   Dialog,
   DialogContent,
@@ -36,6 +42,16 @@ import { toast } from "sonner";
 import { useAuthz } from "@/lib/auth/authz-context";
 import { acquisitionsKpiUpsertSchema, dispositionsKpiUpsertSchema } from "@/features/kpis/schemas";
 import { KPI_FIELD_DEFS, formatTalkTimeMinutes } from "@/features/kpis/utils/kpi-metrics";
+import type { KpiTargetsByMetricKey } from "@/features/kpis/server/kpis.service";
+import {
+  computeKpiRepWeeklyCompliance,
+  computeKpiTeamComplianceSummary,
+  computeKpiRepHistoricalHitRates,
+  generateWeeklyKpiSummaryText,
+  getKpiComparisonMetricKeysForTeam,
+  kpiHitBadgeVariant,
+} from "@/features/kpis/lib/kpi-compliance";
+import type { KpiTeam } from "@/features/kpis/lib/kpi-compliance";
 
 function KpiEntryForm({
   team,
@@ -112,7 +128,7 @@ function KpiEntryForm({
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <FormField
           control={form.control}
-          name={"repUserId" as any}
+          name="repUserId"
           render={({ field }) => (
             <FormItem>
               <FormLabel className="text-xs">Rep</FormLabel>
@@ -150,7 +166,7 @@ function KpiEntryForm({
               <FormField
                 key={def.field}
                 control={form.control}
-                name={def.field as any}
+                name={def.field as keyof UpsertKpiEntryInput}
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="text-xs">{def.label}</FormLabel>
@@ -171,7 +187,7 @@ function KpiEntryForm({
 
           <FormField
             control={form.control}
-            name={"revenueFromFunded" as any}
+            name="revenueFromFunded"
             render={({ field }) => (
               <FormItem className="col-span-2">
                 <FormLabel className="text-xs">{KPI_FIELD_DEFS[team].find((d) => d.field === "revenueFromFunded")?.label ?? "Revenue"}</FormLabel>
@@ -203,6 +219,8 @@ export default function KPIsPage() {
   const [week, setWeek] = useState("2026-03-03");
   const [entryOpen, setEntryOpen] = useState(false);
   const [repUserIdForForm, setRepUserIdForForm] = useState<string>("");
+  const [bulkText, setBulkText] = useState<string>("");
+  const [bulkResult, setBulkResult] = useState<BulkImportKpisResult | null>(null);
 
   const allowedTeams = useMemo((): Team[] => {
     if (roleCode === "REP") {
@@ -219,11 +237,49 @@ export default function KPIsPage() {
   }, [allowedTeams, team]);
 
   const { data: weeks } = useKpiWeeks(team);
-  const { data: entries, isLoading } = useKpiEntries(team, week);
+
+  const prevWeekStarting = useMemo(() => {
+    if (!weeks?.length) return week;
+    const idx = weeks.indexOf(week);
+    if (idx === -1) return week;
+    return weeks[idx + 1] ?? week;
+  }, [weeks, week]);
+
+  // Load both teams so the weekly deterministic text summary can always cover
+  // Acquisitions + Dispositions, even when the tab is on only one team.
+  const {
+    data: acquisitionsEntries,
+    isLoading: isLoadingAcqEntries,
+  } = useKpiEntries("acquisitions", week);
+  const {
+    data: dispositionsEntries,
+    isLoading: isLoadingDispoEntries,
+  } = useKpiEntries("dispositions", week);
+
+  const {
+    data: acquisitionsPrevEntries,
+    isLoading: isLoadingAcqPrevEntries,
+  } = useKpiEntries("acquisitions", prevWeekStarting);
+  const {
+    data: dispositionsPrevEntries,
+    isLoading: isLoadingDispoPrevEntries,
+  } = useKpiEntries("dispositions", prevWeekStarting);
+
+  const { data: entries, isLoading } = team === "acquisitions"
+    ? { data: acquisitionsEntries, isLoading: isLoadingAcqEntries }
+    : { data: dispositionsEntries, isLoading: isLoadingDispoEntries };
+
   const { data: summary } = useKpiWeekSummary(team, week);
   const { data: trendData } = useKpiTrend(team);
-  const { data: targets } = useKpiTargets(team);
+  const { data: acquisitionsTargets } = useKpiTargets("acquisitions");
+  const { data: dispositionsTargets } = useKpiTargets("dispositions");
+  const { data: targets } = team === "acquisitions"
+    ? { data: acquisitionsTargets }
+    : { data: dispositionsTargets };
+
   const { data: repUsers } = useKpiFormUsers(team);
+  const { data: history } = useKpiHistory(team);
+  const bulkImportMutation = useBulkImportKpis();
 
   useEffect(() => {
     if (!weeks?.length) return;
@@ -246,6 +302,161 @@ export default function KPIsPage() {
   const repUserIdForFormEffective = repUserIdForForm || repUsers?.[0]?.id;
   const existingEntryForForm = entries?.find((e) => e.userId === repUserIdForFormEffective);
 
+  const kpiTeam: KpiTeam = team === "acquisitions" ? "acquisitions" : team === "dispositions" ? "dispositions" : "acquisitions";
+  const kpiMetricKeysForTeam = useMemo(() => getKpiComparisonMetricKeysForTeam(kpiTeam), [kpiTeam]);
+
+  const acqTeamCompliance = useMemo(() => {
+    if (!acquisitionsTargets || !acquisitionsEntries) return null;
+    return computeKpiTeamComplianceSummary({
+      team: "acquisitions",
+      weekStarting: week,
+      entries: acquisitionsEntries,
+      targets: acquisitionsTargets as KpiTargetsByMetricKey,
+    });
+  }, [acquisitionsEntries, acquisitionsTargets, week]);
+
+  const dispoTeamCompliance = useMemo(() => {
+    if (!dispositionsTargets || !dispositionsEntries) return null;
+    return computeKpiTeamComplianceSummary({
+      team: "dispositions",
+      weekStarting: week,
+      entries: dispositionsEntries,
+      targets: dispositionsTargets as KpiTargetsByMetricKey,
+    });
+  }, [dispositionsEntries, dispositionsTargets, week]);
+
+  const acqTeamCompliancePrev = useMemo(() => {
+    if (!acquisitionsTargets || !acquisitionsPrevEntries) return null;
+    return computeKpiTeamComplianceSummary({
+      team: "acquisitions",
+      weekStarting: prevWeekStarting,
+      entries: acquisitionsPrevEntries,
+      targets: acquisitionsTargets as KpiTargetsByMetricKey,
+    });
+  }, [acquisitionsPrevEntries, acquisitionsTargets, prevWeekStarting]);
+
+  const dispoTeamCompliancePrev = useMemo(() => {
+    if (!dispositionsTargets || !dispositionsPrevEntries) return null;
+    return computeKpiTeamComplianceSummary({
+      team: "dispositions",
+      weekStarting: prevWeekStarting,
+      entries: dispositionsPrevEntries,
+      targets: dispositionsTargets as KpiTargetsByMetricKey,
+    });
+  }, [dispositionsPrevEntries, dispositionsTargets, prevWeekStarting]);
+
+  const repWeeklyComplianceByUserId = useMemo(() => {
+    if (!targets || !entries) return new Map<string, ReturnType<typeof computeKpiRepWeeklyCompliance>>();
+    const m = new Map<string, ReturnType<typeof computeKpiRepWeeklyCompliance>>();
+    for (const e of entries) {
+      const comp = computeKpiRepWeeklyCompliance({
+        team: kpiTeam,
+        weekStarting: week,
+        entry: e,
+        targets: targets as KpiTargetsByMetricKey,
+      });
+      m.set(e.userId, comp);
+    }
+    return m;
+  }, [entries, targets, kpiTeam, week]);
+
+  const repPrevWeeklyComplianceByUserId = useMemo(() => {
+    const prevEntries = team === "acquisitions" ? acquisitionsPrevEntries : dispositionsPrevEntries;
+    const prevTargets = team === "acquisitions" ? acquisitionsTargets : dispositionsTargets;
+    if (!prevTargets || !prevEntries) return new Map<string, ReturnType<typeof computeKpiRepWeeklyCompliance>>();
+
+    const m = new Map<string, ReturnType<typeof computeKpiRepWeeklyCompliance>>();
+    for (const e of prevEntries) {
+      const comp = computeKpiRepWeeklyCompliance({
+        team: kpiTeam,
+        weekStarting: prevWeekStarting,
+        entry: e,
+        targets: prevTargets as KpiTargetsByMetricKey,
+      });
+      m.set(e.userId, comp);
+    }
+    return m;
+  }, [
+    team,
+    acquisitionsPrevEntries,
+    dispositionsPrevEntries,
+    acquisitionsTargets,
+    dispositionsTargets,
+    kpiTeam,
+    prevWeekStarting,
+  ]);
+
+  const currentTeamLeaders = useMemo(() => {
+    if (!entries) return { leaderUserId: null as string | null, atRiskUserId: null as string | null };
+    const list = entries
+      .slice()
+      .sort((a, b) => {
+        const aa = repWeeklyComplianceByUserId.get(a.userId)?.compliancePercent ?? 0;
+        const bb = repWeeklyComplianceByUserId.get(b.userId)?.compliancePercent ?? 0;
+        if (bb !== aa) return bb - aa;
+        return a.userId.localeCompare(b.userId);
+      });
+    const leaderUserId = list[0]?.userId ?? null;
+    const atRiskUserId = list[list.length - 1]?.userId ?? null;
+    return { leaderUserId, atRiskUserId };
+  }, [entries, repWeeklyComplianceByUserId]);
+
+  const repHistoricalHitRatesByUserId = useMemo(() => {
+    if (!targets || !entries) return new Map<string, ReturnType<typeof computeKpiRepHistoricalHitRates>>();
+    const m = new Map<string, ReturnType<typeof computeKpiRepHistoricalHitRates>>();
+    if (!history || history.length === 0) return m;
+
+    const historyByRep = new Map<string, typeof history>();
+    for (const row of history) {
+      const cur = historyByRep.get(row.repUserId) ?? [];
+      cur.push(row);
+      historyByRep.set(row.repUserId, cur);
+    }
+
+    for (const e of entries) {
+      const rows = historyByRep.get(e.userId) ?? [];
+      const comp = computeKpiRepHistoricalHitRates({
+        team: kpiTeam,
+        repUserId: e.userId,
+        repName: e.repName,
+        historyRows: rows,
+        targets: targets as KpiTargetsByMetricKey,
+      });
+      m.set(e.userId, comp);
+    }
+
+    return m;
+  }, [entries, history, targets, kpiTeam]);
+
+  const weeklySummaryText = useMemo(() => {
+    if (!acquisitionsEntries || !dispositionsEntries || !acquisitionsTargets || !dispositionsTargets) return null;
+    if (!week) return null;
+    return generateWeeklyKpiSummaryText({
+      weekStarting: week,
+      acquisitions: { entries: acquisitionsEntries, targets: acquisitionsTargets as KpiTargetsByMetricKey },
+      dispositions: { entries: dispositionsEntries, targets: dispositionsTargets as KpiTargetsByMetricKey },
+    });
+  }, [acquisitionsEntries, dispositionsEntries, acquisitionsTargets, dispositionsTargets, week]);
+
+  const weeklySummaryCopyText = useMemo(() => {
+    if (!weeklySummaryText) return null;
+    return [
+      weeklySummaryText.acquisitionsRecap,
+      weeklySummaryText.dispositionsRecap,
+      "",
+      weeklySummaryText.teamTakeaway,
+      "",
+      ...weeklySummaryText.stretchFocusByRep.map((r) => `- ${r.text}`),
+    ].join("\n");
+  }, [weeklySummaryText]);
+
+  const formatWeekLabel = (weekStarting: string | null | undefined) => {
+    if (!weekStarting) return "—";
+    const d = new Date(`${weekStarting}T00:00:00.000Z`);
+    if (Number.isNaN(d.getTime())) return weekStarting;
+    return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  };
+
   return (
     <div className="space-y-6 max-w-[1440px] mx-auto">
       <PageHeader title="KPI Tracking" description="Weekly performance metrics by team">
@@ -257,11 +468,27 @@ export default function KPIsPage() {
             <SelectContent>
               {weeks?.map((w) => (
                 <SelectItem key={w} value={w}>
-                  Week of {w}
+                  Week of {formatWeekLabel(w)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {weeklySummaryCopyText && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(weeklySummaryCopyText);
+                  toast.success("Weekly KPI summary copied");
+                } catch {
+                  toast.error("Failed to copy summary");
+                }
+              }}
+            >
+              Copy Weekly KPI Summary
+            </Button>
+          )}
           {can("kpi:new_entry") && (
             <Dialog open={entryOpen} onOpenChange={setEntryOpen}>
               <DialogTrigger asChild>
@@ -295,6 +522,79 @@ export default function KPIsPage() {
         </div>
       </PageHeader>
 
+      {can("kpi:new_entry") && (
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold">Bulk JSON KPI Import</h3>
+              <p className="text-xs text-muted-foreground">
+                Paste payloads with `weeks[]`, `weekStarting` (YYYY-MM-DD Monday UTC), and `repName` metrics.
+              </p>
+            </div>
+          </div>
+
+          <Textarea
+            value={bulkText}
+            onChange={(e) => {
+              setBulkText(e.target.value);
+              setBulkResult(null);
+            }}
+            placeholder={`{\n  "weeks": [\n    {\n      "weekStarting": "2026-03-03",\n      "acquisitions": [\n        {\n          "repName": "Melina",\n          "dials": 175,\n          "talkHours": 14.6,\n          "offersMade": 35,\n          "contractsSigned": 6\n        }\n      ],\n      "dispositions": [\n        {\n          "repName": "Derek",\n          "dials": 318,\n          "talkHours": 2.5\n        }\n      ]\n    }\n  ]\n}`}
+            className="min-h-[180px]"
+          />
+
+          <div className="flex items-center justify-between gap-3">
+            <Button
+              size="sm"
+              onClick={async () => {
+                if (!bulkText.trim()) return;
+                try {
+                  const parsed = JSON.parse(bulkText) as KpiBulkImportInput;
+                  const res = await bulkImportMutation.mutateAsync(parsed);
+                  setBulkResult(res);
+                  if (res.errors.length === 0) {
+                    toast.success(`Imported KPI data (${res.imported} created, ${res.updated} updated).`);
+                    setBulkText("");
+                  } else {
+                    toast.error(`Imported with ${res.errors.length} issue(s): ${res.imported} created, ${res.updated} updated.`);
+                  }
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : "Failed to import KPI data";
+                  toast.error(msg);
+                }
+              }}
+              disabled={bulkImportMutation.isPending || !bulkText.trim()}
+            >
+              {bulkImportMutation.isPending ? "Importing..." : "Import JSON"}
+            </Button>
+
+            {bulkResult && (
+              <div className="text-xs text-muted-foreground">
+                Created: <span className="font-medium">{bulkResult.imported}</span>, Updated:{" "}
+                <span className="font-medium">{bulkResult.updated}</span>, Skipped:{" "}
+                <span className="font-medium">{bulkResult.skipped}</span>
+              </div>
+            )}
+          </div>
+
+          {bulkResult?.errors?.length ? (
+            <div className="space-y-1">
+              <p className="text-xs font-medium">Issues</p>
+              <div className="text-xs text-muted-foreground max-h-28 overflow-auto rounded border p-2">
+                {bulkResult.errors.map((err, idx) => (
+                  <div key={`${err.code}-${idx}`} className="mb-1">
+                    <span className="font-medium">{err.code}</span>
+                    {err.weekStarting ? <span> · week {err.weekStarting}</span> : null}
+                    {err.repName ? <span> · rep {err.repName}</span> : null}
+                    <div className="break-words">{err.message}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       <Tabs value={team} onValueChange={(v) => setTeam(v as Team)}>
         <TabsList>
           {allowedTeams.includes("acquisitions") && <TabsTrigger value="acquisitions">Acquisitions</TabsTrigger>}
@@ -322,6 +622,97 @@ export default function KPIsPage() {
             />
           </div>
 
+          {/* Team compliance strip */}
+          {(acqTeamCompliance || dispoTeamCompliance) && (
+            <div className="rounded-lg border bg-card p-5 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold">Team KPI Compliance</h3>
+                    <p className="text-xs text-muted-foreground">Week of {formatWeekLabel(week)}</p>
+                </div>
+                <div className="text-right text-xs text-muted-foreground">
+                  <div>Acq reps: {acqTeamCompliance?.totalRepsConsidered ?? 0}</div>
+                  <div>Dispo reps: {dispoTeamCompliance?.totalRepsConsidered ?? 0}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(
+                  [
+                    { team: "acquisitions" as const, data: acqTeamCompliance, prev: acqTeamCompliancePrev },
+                    { team: "dispositions" as const, data: dispoTeamCompliance, prev: dispoTeamCompliancePrev },
+                  ] as const
+                ).map(({ team: t, data, prev }) => {
+                  if (!data) return null;
+                  const overallPct = data.compliancePercent;
+                  const overallTone = overallPct >= 100 ? "bg-success/10 text-success border-success/30" : overallPct >= 50 ? "bg-warning/10 text-warning border-warning/30" : "bg-destructive/10 text-destructive border-destructive/30";
+
+                  const deltaForMetric = (metricKey: string) => {
+                    const cur = data.metrics.find((m) => m.metricKey === metricKey)?.hitRatePercent ?? 0;
+                    const pr = prev?.metrics.find((m) => m.metricKey === metricKey)?.hitRatePercent ?? 0;
+                    return cur - pr;
+                  };
+
+                  return (
+                    <div key={t} className={cn("rounded-lg border p-4", overallTone)}>
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground capitalize">{t}</p>
+                          <p className="text-sm font-semibold font-mono">{overallPct.toFixed(0)}%</p>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground font-medium">
+                          {data.kpisHitCount}/{data.totalKpisTracked} hits
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        {data.metrics.map((m) => {
+                          const hitPct = m.hitRatePercent;
+                          const tone =
+                            hitPct >= 100
+                              ? "bg-success/15 text-success border-success/30"
+                              : hitPct >= 90
+                                ? "bg-warning/15 text-warning border-warning/30"
+                                : hitPct === 0
+                                  ? "bg-destructive/15 text-destructive border-destructive/30"
+                                  : "bg-destructive/15 text-destructive border-destructive/30";
+                          const delta = deltaForMetric(m.metricKey);
+                          const arrow = Math.abs(delta) < 0.5 ? "→" : delta > 0 ? "↑" : "↓";
+                          const label =
+                            m.metricKey === "OFFERS_MADE" ? `Offers (min): ${m.hitLabel} hit` : `${m.metricLabel}: ${m.hitLabel} hit`;
+                          return (
+                            <div key={m.metricKey} className={cn("flex items-center justify-between gap-3 rounded-md border px-3 py-2", tone)}>
+                              <p className="text-xs font-medium truncate">{label}</p>
+                              <p className="text-xs font-semibold font-mono flex items-center gap-2">
+                                {m.hitRatePercent.toFixed(0)}% {arrow}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Deterministic weekly summary */}
+          {weeklySummaryText && (
+            <div className="rounded-lg border bg-card p-5 space-y-2">
+              <h3 className="text-sm font-semibold">Weekly KPI Summary</h3>
+              <div className="text-sm text-muted-foreground whitespace-pre-line">
+                {weeklySummaryText.acquisitionsRecap}
+                {"\n"}
+                {weeklySummaryText.dispositionsRecap}
+                {"\n\n"}
+                {weeklySummaryText.teamTakeaway}
+                {"\n\n"}
+                {weeklySummaryText.stretchFocusByRep.map((r) => `- ${r.text}`).join("\n")}
+              </div>
+            </div>
+          )}
+
           {/* Rep scorecards */}
           {isLoading ? (
             <LoadingState variant="cards" />
@@ -330,7 +721,11 @@ export default function KPIsPage() {
               {entries?.map((entry) => (
                 <div
                   key={entry.id}
-                  className="rounded-lg border bg-card p-5 hover:border-primary/20 transition-colors"
+                  className={cn(
+                    "rounded-lg border bg-card p-5 hover:border-primary/20 transition-colors",
+                    currentTeamLeaders.leaderUserId === entry.userId ? "border-success/50 ring-1 ring-success/20" : "",
+                    currentTeamLeaders.atRiskUserId === entry.userId ? "border-destructive/50 ring-1 ring-destructive/20" : ""
+                  )}
                 >
                   <div className="flex items-center gap-3 mb-4">
                     <div className="flex items-center justify-center h-9 w-9 rounded-full bg-primary/10 text-primary text-xs font-bold">
@@ -341,13 +736,43 @@ export default function KPIsPage() {
                       <p className="text-xs text-muted-foreground capitalize">{team}</p>
                     </div>
                   </div>
+
+                  {(() => {
+                    const repCompliance = repWeeklyComplianceByUserId.get(entry.userId);
+                    if (!repCompliance) return null;
+
+                    const pct = repCompliance.compliancePercent;
+                    const tone =
+                      pct >= 100 ? "bg-success/10 text-success border-success/30" : pct >= 50 && pct <= 75 ? "bg-warning/10 text-warning border-warning/30" : "bg-destructive/10 text-destructive border-destructive/30";
+
+                    return (
+                      <div className="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                          <p className="text-xs text-muted-foreground uppercase tracking-wider">KPI Score</p>
+                          <p className="text-sm font-semibold font-mono">
+                            <span className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold", tone)}>
+                              {repCompliance.kpisHitCount} / {repCompliance.totalKpisTracked}
+                            </span>
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-muted-foreground">Compliance</p>
+                          <p className="text-sm font-semibold font-mono">{repCompliance.compliancePercent.toFixed(0)}%</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <div className="grid grid-cols-2 gap-y-2.5 gap-x-4 text-sm">
                     {KPI_FIELD_DEFS[team]
                       .filter((d) => d.field !== "revenueFromFunded")
                       .map((def) => {
-                        const value = (entry as any)[def.field] as number | undefined;
+                        const value = (entry as Record<string, number | undefined>)[def.field];
                         const target = targets?.[def.metricKey];
                         const isFallout = def.field === "falloutCount";
+                        const isTrackedKpi = kpiMetricKeysForTeam.includes(def.metricKey);
+                        const repCompliance = repWeeklyComplianceByUserId.get(entry.userId);
+                        const metricComp = repCompliance?.metrics.find((m) => m.metricKey === def.metricKey);
 
                         const valueText =
                           def.field === "talkTimeMinutes"
@@ -367,14 +792,134 @@ export default function KPIsPage() {
 
                         return (
                           <div key={def.field}>
-                            <span className="text-xs text-muted-foreground">{def.label}</span>
-                            <p className={["font-semibold font-mono", isFallout ? "text-destructive" : ""].join(" ")}>
-                              {valueText}
-                            </p>
-                            {targetText != null && (
-                              <p className="text-[11px] text-muted-foreground">
-                                Target: {targetText}
-                              </p>
+                            {isTrackedKpi && metricComp ? (
+                              <span className="text-xs text-muted-foreground hidden">{def.label}</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{def.label}</span>
+                            )}
+                            {isTrackedKpi && metricComp ? (
+                              (() => {
+                                const prevMetricComp = repPrevWeeklyComplianceByUserId.get(entry.userId)?.metrics.find((m) => m.metricKey === def.metricKey);
+                                const delta = metricComp.percentToGoal - (prevMetricComp?.percentToGoal ?? metricComp.percentToGoal);
+                                const trendArrow = Math.abs(delta) < 0.5 ? "→" : delta > 0 ? "↑" : "↓";
+
+                                const dailyAvgStr =
+                                  def.metricKey === "TALK_TIME_MINUTES"
+                                    ? formatTalkTimeMinutes(Math.round(metricComp.actualDailyAverage))
+                                    : metricComp.actualDailyAverage.toFixed(1).replace(/\.0$/, "");
+
+                                const dailyTargetStr =
+                                  def.metricKey === "TALK_TIME_MINUTES"
+                                    ? formatTalkTimeMinutes(Math.round(metricComp.dailyTarget))
+                                    : metricComp.dailyTarget.toFixed(1).replace(/\.0$/, "");
+
+                                const nearMiss = !metricComp.hit && metricComp.percentToGoal >= 90 && metricComp.percentToGoal < 100;
+
+                                const offersTier = metricComp.offers?.offersTier;
+                                const offersBadge =
+                                  offersTier === "HIT_TARGET"
+                                    ? { emoji: "🟢", text: "Hit Target", tone: "bg-success/10 text-success border-success/30" }
+                                    : offersTier === "HIT_FLOOR_ONLY"
+                                      ? { emoji: "🟡", text: "Met Minimum", tone: "bg-warning/10 text-warning border-warning/30" }
+                                      : { emoji: "🔴", text: "Below Minimum", tone: "bg-destructive/10 text-destructive border-destructive/30" };
+
+                                const binaryBadge = metricComp.hit
+                                  ? { emoji: "🟢", text: "Hit KPI", tone: "bg-success/10 text-success border-success/30" }
+                                  : nearMiss
+                                    ? { emoji: "🟡", text: "Near Miss", tone: "bg-warning/10 text-warning border-warning/30" }
+                                    : { emoji: "🔴", text: "Missed KPI", tone: "bg-destructive/10 text-destructive border-destructive/30" };
+
+                                const varianceTone = metricComp.offers
+                                  ? offersTier === "HIT_FLOOR_ONLY"
+                                    ? "text-warning"
+                                    : offersTier === "HIT_TARGET"
+                                      ? "text-success"
+                                      : "text-destructive"
+                                  : metricComp.hit
+                                    ? "text-success"
+                                    : nearMiss
+                                      ? "text-warning"
+                                      : "text-destructive";
+
+                                const variancePrefix = metricComp.offers
+                                  ? offersTier === "HIT_TARGET"
+                                    ? "✅"
+                                    : offersTier === "HIT_FLOOR_ONLY"
+                                      ? "🟡"
+                                      : "❌"
+                                  : metricComp.hit
+                                    ? "✅"
+                                    : nearMiss
+                                      ? "✅"
+                                      : "❌";
+
+                                const totalLine =
+                                  metricComp.offers ? (
+                                    `Offers: ${metricComp.actualTotal.toLocaleString()}`
+                                  ) : def.metricKey === "TALK_TIME_MINUTES" ? (
+                                    `Talk Time: ${formatTalkTimeMinutes(metricComp.actualTotal)}`
+                                  ) : (
+                                    `${def.metricKey === "DIALS" ? "Dials" : def.metricKey === "CONTRACTS_SIGNED" ? "Contracts" : def.label}: ${metricComp.actualTotal.toLocaleString()}`
+                                  );
+
+                                return (
+                                  <>
+                                    <p className="text-sm font-semibold font-mono leading-tight">{totalLine}</p>
+
+                                    {metricComp.offers ? (
+                                      <>
+                                        <div className="flex items-center justify-between gap-2 mt-1">
+                                          <span
+                                            className={cn(
+                                              "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border",
+                                              offersBadge.tone
+                                            )}
+                                          >
+                                            {offersBadge.emoji} {offersBadge.text}
+                                          </span>
+                                          <span className={cn("text-[11px] font-medium", varianceTone)}>{trendArrow}</span>
+                                        </div>
+
+                                        <p className="text-[11px] text-muted-foreground mt-1 font-semibold">
+                                          {dailyAvgStr}/day avg • Minimum: {metricComp.offers.floorDailyTarget.toFixed(0).replace(/\.0$/, "")}/day • Target:{" "}
+                                          {metricComp.dailyTarget.toFixed(0).replace(/\.0$/, "")}/day
+                                        </p>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <p className="text-[11px] text-muted-foreground mt-1 font-semibold">
+                                          {dailyAvgStr}/day avg • KPI: {dailyTargetStr}/day
+                                        </p>
+
+                                        <div className="flex items-center justify-between gap-2 mt-1">
+                                          <span
+                                            className={cn(
+                                              "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border",
+                                              binaryBadge.tone
+                                            )}
+                                          >
+                                            {binaryBadge.emoji} {binaryBadge.text}
+                                          </span>
+                                          <span className={cn("text-[11px] font-medium", varianceTone)}>{trendArrow}</span>
+                                        </div>
+                                      </>
+                                    )}
+
+                                    <p className={cn("text-[11px] leading-4 mt-1 font-semibold", varianceTone)}>
+                                      {variancePrefix} {metricComp.varianceText}
+                                    </p>
+                                  </>
+                                );
+                              })()
+                            ) : (
+                              <>
+                                <p className={["font-semibold font-mono", isFallout ? "text-destructive" : ""].join(" ")}>
+                                  {valueText}
+                                </p>
+                                {targetText != null && (
+                                  <p className="text-[11px] text-muted-foreground">Target: {targetText}</p>
+                                )}
+                              </>
                             )}
                           </div>
                         );
@@ -392,6 +937,46 @@ export default function KPIsPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* Historical hit rates */}
+                  {(() => {
+                    const repHistory = repHistoricalHitRatesByUserId.get(entry.userId);
+                    if (!repHistory) return null;
+                    return (
+                      <div className="mt-4 pt-4 border-t">
+                        <div className="flex items-baseline justify-between gap-4 mb-3">
+                          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Historical KPI Hit Rate</h4>
+                          <span className="text-[11px] text-muted-foreground font-mono">{repHistory.weeksCounted} weeks</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-y-2 gap-x-3">
+                          {repHistory.metrics.map((m) => (
+                            <div key={m.metricKey} className="space-y-1">
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="text-xs text-muted-foreground truncate">{m.metricLabel}</span>
+                                <span className="text-xs font-semibold font-mono">{m.hitRatePercent.toFixed(0)}%</span>
+                              </div>
+                              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className={cn(
+                                    "h-full rounded-full",
+                                      m.hitRatePercent >= 100
+                                        ? "bg-success"
+                                        : m.hitRatePercent >= 90
+                                          ? "bg-warning"
+                                          : "bg-destructive"
+                                  )}
+                                  style={{ width: `${Math.min(100, Math.max(0, m.hitRatePercent))}%` }}
+                                />
+                              </div>
+                              <p className="text-[11px] text-muted-foreground">
+                                {m.hitWeeks}/{m.totalWeeksCounted} weeks
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
 

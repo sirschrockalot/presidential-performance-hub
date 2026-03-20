@@ -12,6 +12,9 @@ export type { KpiEntryWithRepDto, KpiWeekSummaryDto, KpiTrendPointDto, KpiTarget
 
 import type { UpsertKpiEntryInput } from "@/features/kpis/server/kpis.service";
 
+import type { KpiBulkImportInput } from "@/features/kpis/schemas/kpi-bulk-import.schemas";
+import type { BulkImportKpisResult } from "@/features/kpis/server/kpi-bulk-import.service";
+
 async function parseJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   let data: unknown = null;
@@ -89,5 +92,16 @@ export async function upsertKpiEntryApi(input: UpsertKpiEntryInput): Promise<{ e
   });
   const data = await parseJson<{ entry: KpiEntryWithRepDto }>(res);
   return data;
+}
+
+export async function bulkImportKpisApi(payload: KpiBulkImportInput): Promise<BulkImportKpisResult> {
+  const res = await fetch(`/api/kpis/bulk-import`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await parseJson<{ result: BulkImportKpisResult }>(res);
+  return data.result;
 }
 

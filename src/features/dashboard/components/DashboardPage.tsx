@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { MetricCard } from "@/components/shared/MetricCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ActivityFeed } from "@/components/shared/ActivityFeed";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { useDealMetrics, useDeals } from "@/features/deals/hooks/use-deals";
 import { useLeaderboard, usePointsMetrics } from "@/features/points/hooks/use-points";
 import { useDrawMetrics } from "@/features/draws/hooks/use-draws";
@@ -25,6 +27,7 @@ import {
 import { LoadingState } from "@/components/shared/LoadingState";
 import { useAuthz } from "@/lib/auth/authz-context";
 import { DashboardChartsSkeleton } from "@/features/dashboard/components/DashboardChartsSkeleton";
+import { cn } from "@/lib/utils";
 
 const DashboardCharts = dynamic(
   () => import("@/features/dashboard/components/DashboardCharts").then((m) => m.DashboardCharts),
@@ -45,6 +48,7 @@ export default function DashboardPage() {
 
   const topReps = useMemo(() => (leaderboard ?? []).slice(0, 5), [leaderboard]);
   const pointsSubtitle = roleCode === "REP" ? "Your profit-sharing points" : "Company-wide profit sharing";
+  const kpiDashboard = overview?.kpiDashboard;
 
   const revenueTrendDeltaPct = (() => {
     const series = overview?.assignmentRevenueTrend ?? [];
@@ -57,6 +61,30 @@ export default function DashboardPage() {
   if (status === "loading" || !metrics || overviewLoading || !overview || !drawMetrics || !pointsMetrics) {
     return <LoadingState variant="page" />;
   }
+
+  const formatWeekLabel = (weekStarting: string | null | undefined) => {
+    if (!weekStarting) return "—";
+    const d = new Date(`${weekStarting}T00:00:00.000Z`);
+    if (Number.isNaN(d.getTime())) return weekStarting;
+    return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  };
+
+  const complianceTone = (pct: number) =>
+    pct >= 100
+      ? "bg-success/10 text-success border-success/30"
+      : pct >= 50 && pct <= 75
+        ? "bg-warning/10 text-warning border-warning/30"
+        : "bg-destructive/10 text-destructive border-destructive/30";
+
+  const hitTone = (hitRatePercent: number) =>
+    hitRatePercent >= 100
+      ? "bg-success/10 text-success border-success/30"
+      : hitRatePercent >= 90
+        ? "bg-warning/10 text-warning border-warning/30"
+        : "bg-destructive/10 text-destructive border-destructive/30";
+
+  const hitBadgeLabel = (hitRatePercent: number) =>
+    hitRatePercent >= 100 ? "Hit KPI" : hitRatePercent >= 90 ? "Near Miss" : "Missed KPI";
 
   return (
     <div className="space-y-6 max-w-[1440px] mx-auto">
@@ -112,6 +140,60 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
+
+          {kpiDashboard && (
+            <div className="mt-6 pt-6 border-t">
+              <div className="flex items-baseline justify-between gap-4 mb-3">
+                <h2 className="text-sm font-semibold text-card-foreground">KPI Hit Rate</h2>
+                <span className="text-[11px] text-muted-foreground font-mono">
+                  {kpiDashboard.lastWeekStarting ? `Week of ${formatWeekLabel(kpiDashboard.lastWeekStarting)}` : "—"}
+                </span>
+              </div>
+
+              <div className="text-xs text-muted-foreground mb-3">
+                Top:{" "}
+                <span className="font-medium">
+                  {kpiDashboard.topPerformer ? kpiDashboard.topPerformer.repName.split(" ")[0] : "—"}
+                </span>
+                {kpiDashboard.topPerformer && (
+                  <span className={cn("ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold", complianceTone(kpiDashboard.topPerformer.compliancePercent))}>
+                    🟢 {kpiDashboard.topPerformer.compliancePercent.toFixed(0)}%
+                  </span>
+                )}
+                {" · "}
+                At-risk:{" "}
+                <span className="font-medium">
+                  {kpiDashboard.mostAtRisk ? kpiDashboard.mostAtRisk.repName.split(" ")[0] : "—"}
+                </span>
+                {kpiDashboard.mostAtRisk && (
+                  <span className={cn("ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold", complianceTone(kpiDashboard.mostAtRisk.compliancePercent))}>
+                    {kpiDashboard.mostAtRisk.compliancePercent >= 50 ? "🟡" : "🔴"} {kpiDashboard.mostAtRisk.compliancePercent.toFixed(0)}%
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {kpiDashboard.leaderboard.map((entry, i) => (
+                  <div key={entry.repUserId} className="flex items-center gap-3">
+                    <div
+                      className={`flex items-center justify-center h-7 w-7 rounded-full text-[11px] font-bold ${
+                        i === 0 ? "bg-success/20 text-success" : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {i + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{entry.repName}</p>
+                      <p className="text-xs text-muted-foreground capitalize">{entry.team}</p>
+                    </div>
+                    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold", complianceTone(entry.compliancePercent))}>
+                      {entry.compliancePercent >= 100 ? "🟢" : entry.compliancePercent >= 50 ? "🟡" : "🔴"} {entry.compliancePercent.toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="lg:col-span-5 rounded-lg border bg-card p-5">
@@ -139,6 +221,174 @@ export default function DashboardPage() {
             icon={Target}
             subtitle={`Offers: ${overview.weeklySnapshot.offersMade} · Contracts: ${overview.weeklySnapshot.contractsSigned}`}
           />
+
+          {kpiDashboard && (
+            <div className="rounded-lg border bg-card p-5 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-card-foreground">KPI Compliance (Last Week)</h2>
+                  <p className="text-xs text-muted-foreground">
+                    {kpiDashboard.lastWeekStarting ? `Week of ${formatWeekLabel(kpiDashboard.lastWeekStarting)}` : "No completed week found"}
+                  </p>
+                  {kpiDashboard.weeklySummaryText && (
+                    <Button
+                      className="mt-2"
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(kpiDashboard.weeklySummaryText ?? "");
+                          toast.success("Weekly KPI summary copied");
+                        } catch {
+                          toast.error("Failed to copy summary");
+                        }
+                      }}
+                    >
+                      Copy Weekly KPI Summary
+                    </Button>
+                  )}
+                </div>
+                <div className="text-right text-xs text-muted-foreground">
+                  <div>
+                    WoW: Acq{" "}
+                    <span
+                      className={cn(
+                        "font-medium",
+                        kpiDashboard.trendDeltaPctPoints.acquisitions >= 0 ? "text-success" : "text-destructive"
+                      )}
+                    >
+                      {kpiDashboard.trendDeltaPctPoints.acquisitions >= 0 ? "↑ " : "↓ "}
+                      {Math.abs(kpiDashboard.trendDeltaPctPoints.acquisitions).toFixed(0)}pp
+                    </span>
+                  </div>
+                  <div>
+                    WoW: Dispo{" "}
+                    <span
+                      className={cn(
+                        "font-medium",
+                        kpiDashboard.trendDeltaPctPoints.dispositions >= 0 ? "text-success" : "text-destructive"
+                      )}
+                    >
+                      {kpiDashboard.trendDeltaPctPoints.dispositions >= 0 ? "↑ " : "↓ "}
+                      {Math.abs(kpiDashboard.trendDeltaPctPoints.dispositions).toFixed(0)}pp
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(["acquisitions", "dispositions"] as const).map((team) => {
+                  const card = kpiDashboard[team];
+                  const pct = card.overallCompliancePercent;
+                  const colorClass = complianceTone(pct);
+                  return (
+                    <div key={team} className={cn("rounded-lg border p-4", colorClass)}>
+                      <div className="flex items-baseline justify-between gap-4">
+                        <p className="text-xs font-medium text-muted-foreground capitalize">{team}</p>
+                        <span className="text-sm font-semibold font-mono">{pct.toFixed(0)}%</span>
+                      </div>
+                      <div className="mt-3 space-y-1">
+                        {card.metrics.map((m) => (
+                          <div key={m.metricKey} className="flex items-center justify-between gap-3">
+                            <span className="text-xs text-muted-foreground">{m.metricLabel}</span>
+                            {m.metricKey === "OFFERS_MADE" && kpiDashboard.offersTierBreakdown ? (
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-semibold font-mono text-muted-foreground">
+                                  {m.hitLabel} hit
+                                </span>
+                                {(["belowMinimum", "metMinimum", "hitTarget"] as const).map((k) => {
+                                  const tier = kpiDashboard.offersTierBreakdown?.[k];
+                                  if (!tier) return null;
+                                  const prevTier = kpiDashboard.offersTierBreakdown?.prev?.[k];
+                                  const curRate = tier.totalReps ? (tier.reps / tier.totalReps) * 100 : 0;
+                                  const prevRate = prevTier?.totalReps ? (prevTier.reps / prevTier.totalReps) * 100 : 0;
+                                  const delta = curRate - prevRate;
+                                  const arrow = Math.abs(delta) < 0.5 ? "→" : delta > 0 ? "↑" : "↓";
+                                  const chipTone =
+                                    k === "hitTarget"
+                                      ? "bg-success/10 text-success border-success/30"
+                                      : k === "metMinimum"
+                                        ? "bg-warning/10 text-warning border-warning/30"
+                                        : "bg-destructive/10 text-destructive border-destructive/30";
+                                  const chipEmoji = k === "hitTarget" ? "🟢" : k === "metMinimum" ? "🟡" : "🔴";
+                                  const chipText = k === "hitTarget" ? "Hit Target" : k === "metMinimum" ? "Met Minimum" : "Below Minimum";
+                                  return (
+                                    <span
+                                      key={k}
+                                      className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border", chipTone)}
+                                    >
+                                      {chipEmoji} {tier.reps}/{tier.totalReps} {arrow}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border", hitTone(m.hitRatePercent))}>
+                                  {m.hitRatePercent >= 100 ? "🟢" : m.hitRatePercent >= 90 ? "🟡" : "🔴"} {hitBadgeLabel(m.hitRatePercent)}
+                                </span>
+                                <span className={cn("text-[11px] font-semibold font-mono text-muted-foreground")}>
+                                  {m.hitLabel} hit
+                                </span>
+                                <span className={cn("text-[11px] font-medium text-muted-foreground")}>
+                                  {m.hitRatePercentPrev == null
+                                    ? "—"
+                                    : Math.abs(m.hitRatePercent - m.hitRatePercentPrev) < 0.5
+                                      ? "→"
+                                      : m.hitRatePercent - m.hitRatePercentPrev > 0
+                                        ? "↑"
+                                        : "↓"}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {kpiDashboard.offersTierBreakdown?.hitTarget.totalReps > 0 && (
+                <div className="rounded-lg border bg-card p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      Acq Offers (3–5/day)
+                    </h3>
+                    <span className="text-sm font-semibold font-mono">
+                      {kpiDashboard.offersTierBreakdown.hitTarget.reps}/{kpiDashboard.offersTierBreakdown.hitTarget.totalReps} hit
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border",
+                        "bg-destructive/10 text-destructive border-destructive/30"
+                      )}
+                    >
+                      🔴 Below Minimum: {kpiDashboard.offersTierBreakdown.belowMinimum.reps}/{kpiDashboard.offersTierBreakdown.belowMinimum.totalReps}
+                    </span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border",
+                        "bg-warning/10 text-warning border-warning/30"
+                      )}
+                    >
+                      🟡 Met Minimum: {kpiDashboard.offersTierBreakdown.metMinimum.reps}/{kpiDashboard.offersTierBreakdown.metMinimum.totalReps}
+                    </span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border",
+                        "bg-success/10 text-success border-success/30"
+                      )}
+                    >
+                      🟢 Hit Target: {kpiDashboard.offersTierBreakdown.hitTarget.reps}/{kpiDashboard.offersTierBreakdown.hitTarget.totalReps}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

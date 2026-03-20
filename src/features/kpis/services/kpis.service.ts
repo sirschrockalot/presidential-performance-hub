@@ -9,6 +9,7 @@ import {
   fetchKpiWeekSummary,
   getAvailableWeeks,
   upsertKpiEntryApi,
+  bulkImportKpisApi,
 } from "@/features/kpis/api/kpis-client";
 
 export type {
@@ -21,6 +22,8 @@ export type {
 } from "@/features/kpis/server/kpis.service";
 
 export { fetchKpiHistory, fetchKpiFormUsers, fetchKpiTargets, upsertKpiEntryApi };
+
+export { bulkImportKpisApi };
 
 // Keep existing hook API stable (names/signatures) while swapping mocks -> DB.
 export async function getWeekSummary(team: Team, weekStarting: string) {

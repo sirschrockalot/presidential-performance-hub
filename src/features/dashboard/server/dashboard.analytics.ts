@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, TeamCode, UserRoleCode } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 
 import type { DealActor } from "@/features/deals/server/deal-scope";
@@ -9,8 +9,11 @@ import { drawWhereForScope } from "@/features/draws/server/draw-scope";
 
 import type { KpiActor } from "@/features/kpis/server/kpi-scope";
 import { kpiEntryUserWhereForScope, uiTeamToPrismaTeamCode } from "@/features/kpis/server/kpi-scope";
+import type { KpiEntryWithRepDto, KpiTargetsByMetricKey } from "@/features/kpis/server/kpis.service";
+import { listKpiEntries, listKpiTargetsForTeam } from "@/features/kpis/server/kpis.service";
 
 import type { Team } from "@/types";
+import { computeKpiRepWeeklyCompliance, computeKpiTeamComplianceSummary, generateWeeklyKpiSummaryText } from "@/features/kpis/lib/kpi-compliance";
 
 type MonthlySeriesPoint = { month: string; revenue: number; fundedDeals?: number };
 type PointsTrendPoint = { month: string; points: number };
@@ -128,6 +131,16 @@ async function getCurrentWeeklyReportingPeriod(prisma: PrismaClient): Promise<{ 
 
   if (!period) return null;
   return period;
+}
+
+async function getMostRecentCompletedWeeklyPeriods(prisma: PrismaClient): Promise<Array<{ periodStart: Date; periodEnd: Date }>> {
+  const today = dayOnlyUtc(new Date());
+  return prisma.reportingPeriod.findMany({
+    where: { kind: "WEEKLY", periodEnd: { lt: today } },
+    orderBy: { periodStart: "desc" },
+    take: 2,
+    select: { periodStart: true, periodEnd: true },
+  });
 }
 
 async function getMonthlyDealRevenueSeries(params: { prisma: PrismaClient; actor: DealActor; monthsBack: number }): Promise<MonthlySeriesPoint[]> {
@@ -314,7 +327,7 @@ async function getRecentActivityFeed(params: { prisma: PrismaClient; actor: Deal
   const kpiPeriod = await getCurrentWeeklyReportingPeriod(prisma);
   const reportingPeriodStart = kpiPeriod?.periodStart ?? null;
 
-  const accessibleKpiTeamCodes: string[] =
+  const accessibleKpiTeamCodes: TeamCode[] =
     kpiActor.roleCode === "REP"
       ? [kpiActor.teamCode]
       : kpiActor.roleCode === "ACQUISITIONS_MANAGER"
@@ -327,7 +340,7 @@ async function getRecentActivityFeed(params: { prisma: PrismaClient; actor: Deal
     ...(reportingPeriodStart
       ? { reportingPeriod: { kind: "WEEKLY", periodStart: reportingPeriodStart } }
       : { reportingPeriod: { kind: "WEEKLY" } }),
-    team: { code: { in: accessibleKpiTeamCodes as any } },
+    team: { code: { in: accessibleKpiTeamCodes } },
     ...(kpiActor.roleCode === "REP" ? { userId: kpiActor.id } : {}),
   };
 
@@ -393,11 +406,299 @@ async function getRecentActivityFeed(params: { prisma: PrismaClient; actor: Deal
 }
 
 export async function getDashboardOverview(prisma: PrismaClient, actor: { id: string; roleCode: string; teamCode: string }) {
-  const dealActor: DealActor = { id: actor.id, roleCode: actor.roleCode as any };
-  const drawActor: DrawActor = { id: actor.id, roleCode: actor.roleCode as any, teamCode: actor.teamCode as any };
-  const kpiActor: KpiActor = { id: actor.id, roleCode: actor.roleCode as any, teamCode: actor.teamCode as any };
+  const dealActor: DealActor = { id: actor.id, roleCode: actor.roleCode as unknown as UserRoleCode };
+  const drawActor: DrawActor = { id: actor.id, roleCode: actor.roleCode as unknown as UserRoleCode, teamCode: actor.teamCode as unknown as TeamCode };
+  const kpiActor: KpiActor = { id: actor.id, roleCode: actor.roleCode as unknown as UserRoleCode, teamCode: actor.teamCode as unknown as TeamCode };
 
-  const [assignmentRevenueTrend, pointsTrend, weeklySnapshot, activity, teamSize, monthDealStats] = await Promise.all([
+  const kpiDashboardPromise = (async () => {
+    const accessibleKpiTeams: Array<"acquisitions" | "dispositions"> = (() => {
+      switch (kpiActor.roleCode) {
+        case "REP":
+          return [kpiActor.teamCode === "ACQUISITIONS" ? "acquisitions" : "dispositions"];
+        case "ACQUISITIONS_MANAGER":
+          return ["acquisitions"];
+        case "DISPOSITIONS_MANAGER":
+          return ["dispositions"];
+        default:
+          return ["acquisitions", "dispositions"];
+      }
+    })();
+
+    const completed = await getMostRecentCompletedWeeklyPeriods(prisma);
+    const lastWeek = completed[0];
+    const previousWeek = completed[1];
+
+    const lastWeekStarting = lastWeek ? lastWeek.periodStart.toISOString().slice(0, 10) : null;
+    const previousWeekStarting = previousWeek ? previousWeek.periodStart.toISOString().slice(0, 10) : null;
+
+    if (!lastWeekStarting) {
+      return {
+        lastWeekStarting: null,
+        previousWeekStarting,
+        acquisitions: { overallCompliancePercent: 0, totalReps: 0, metrics: [] },
+        dispositions: { overallCompliancePercent: 0, totalReps: 0, metrics: [] },
+        offersCompliance: undefined,
+        trendDeltaPctPoints: { acquisitions: 0, dispositions: 0 },
+        leaderboard: [],
+        topPerformer: undefined,
+        mostAtRisk: undefined,
+      };
+    }
+
+    type LeaderEntry = {
+      repUserId: string;
+      repName: string;
+      team: "acquisitions" | "dispositions";
+      compliancePercent: number;
+      kpisHitCount: number;
+      totalKpisTracked: number;
+      biggestGapMetricLabel: string | null;
+    };
+
+    const leaderboard: LeaderEntry[] = [];
+
+    let acquisitionsSummaryEntries: KpiEntryWithRepDto[] | null = null;
+    let acquisitionsSummaryTargets: KpiTargetsByMetricKey | null = null;
+    let dispositionsSummaryEntries: KpiEntryWithRepDto[] | null = null;
+    let dispositionsSummaryTargets: KpiTargetsByMetricKey | null = null;
+
+    type TeamCard = {
+      overallCompliancePercent: number;
+      totalReps: number;
+      metrics: Array<{
+        metricKey: string;
+        metricLabel: string;
+        hitLabel: string;
+        hitRatePercent: number;
+        hitLabelPrev?: string;
+        hitRatePercentPrev?: number;
+      }>;
+      compliancePercentPrev: number;
+    };
+
+    const teamCards: Record<"acquisitions" | "dispositions", TeamCard> = {
+      acquisitions: { overallCompliancePercent: 0, totalReps: 0, metrics: [], compliancePercentPrev: 0 },
+      dispositions: { overallCompliancePercent: 0, totalReps: 0, metrics: [], compliancePercentPrev: 0 },
+    };
+
+    const offersTierBreakdown = {
+      belowMinimum: { reps: 0, totalReps: 0 },
+      metMinimum: { reps: 0, totalReps: 0 },
+      hitTarget: { reps: 0, totalReps: 0 },
+      prev: {
+        belowMinimum: { reps: 0, totalReps: 0 },
+        metMinimum: { reps: 0, totalReps: 0 },
+        hitTarget: { reps: 0, totalReps: 0 },
+      },
+    };
+
+    for (const team of accessibleKpiTeams) {
+      const targets = await listKpiTargetsForTeam(prisma, kpiActor, team);
+      const entriesLast = await listKpiEntries(prisma, kpiActor, team, lastWeekStarting);
+      const entriesPrev = previousWeekStarting ? await listKpiEntries(prisma, kpiActor, team, previousWeekStarting) : [];
+
+      if (team === "acquisitions") {
+        acquisitionsSummaryEntries = entriesLast;
+        acquisitionsSummaryTargets = targets;
+      }
+      if (team === "dispositions") {
+        dispositionsSummaryEntries = entriesLast;
+        dispositionsSummaryTargets = targets;
+      }
+
+      const summaryLast = computeKpiTeamComplianceSummary({
+        team,
+        weekStarting: lastWeekStarting,
+        entries: entriesLast,
+        targets,
+      });
+
+      const summaryPrev = previousWeekStarting
+        ? computeKpiTeamComplianceSummary({
+            team,
+            weekStarting: previousWeekStarting,
+            entries: entriesPrev,
+            targets,
+          })
+        : null;
+
+      const cardMetrics = summaryLast.metrics.map((m) => {
+        const prevMetric = summaryPrev?.metrics.find((pm) => pm.metricKey === m.metricKey);
+        return {
+        metricKey: m.metricKey,
+        metricLabel: m.metricLabel,
+        hitLabel: m.hitLabel,
+        hitRatePercent: m.hitRatePercent,
+          hitLabelPrev: prevMetric?.hitLabel,
+          hitRatePercentPrev: prevMetric?.hitRatePercent,
+        };
+      });
+
+      teamCards[team] = {
+        overallCompliancePercent: summaryLast.compliancePercent,
+        totalReps: summaryLast.totalRepsConsidered,
+        metrics: cardMetrics,
+        compliancePercentPrev: summaryPrev?.compliancePercent ?? 0,
+      };
+
+      const perRep = entriesLast.map((entry) =>
+        computeKpiRepWeeklyCompliance({
+          team,
+          weekStarting: lastWeekStarting,
+          entry,
+          targets,
+        })
+      );
+
+      if (team === "acquisitions") {
+        offersTierBreakdown.totalReps = perRep.length;
+        offersTierBreakdown.belowMinimum.totalReps = perRep.length;
+        offersTierBreakdown.metMinimum.totalReps = perRep.length;
+        offersTierBreakdown.hitTarget.totalReps = perRep.length;
+
+        for (const rep of perRep) {
+          const offersMetric = rep.metrics.find((m) => m.metricKey === "OFFERS_MADE");
+          if (!offersMetric?.offers) continue;
+          if (offersMetric.offers.offersTier === "MISS_FLOOR") offersTierBreakdown.belowMinimum.reps += 1;
+          else if (offersMetric.offers.offersTier === "HIT_FLOOR_ONLY") offersTierBreakdown.metMinimum.reps += 1;
+          else offersTierBreakdown.hitTarget.reps += 1;
+        }
+
+        // previous week breakdown
+        const perRepPrev = entriesPrev.map((entry) =>
+          computeKpiRepWeeklyCompliance({
+            team: "acquisitions",
+            weekStarting: previousWeekStarting ?? lastWeekStarting,
+            entry,
+            targets,
+          })
+        );
+        offersTierBreakdown.prev.totalReps = perRepPrev.length;
+        offersTierBreakdown.prev.belowMinimum.totalReps = perRepPrev.length;
+        offersTierBreakdown.prev.metMinimum.totalReps = perRepPrev.length;
+        offersTierBreakdown.prev.hitTarget.totalReps = perRepPrev.length;
+
+        for (const rep of perRepPrev) {
+          const offersMetric = rep.metrics.find((m) => m.metricKey === "OFFERS_MADE");
+          if (!offersMetric?.offers) continue;
+          if (offersMetric.offers.offersTier === "MISS_FLOOR") offersTierBreakdown.prev.belowMinimum.reps += 1;
+          else if (offersMetric.offers.offersTier === "HIT_FLOOR_ONLY") offersTierBreakdown.prev.metMinimum.reps += 1;
+          else offersTierBreakdown.prev.hitTarget.reps += 1;
+        }
+      }
+
+      for (const rep of perRep) {
+        const worstMissed = rep.metrics
+          .filter((m) => !m.hit)
+          .slice()
+        .sort((a, b) => a.varianceDailyAverage - b.varianceDailyAverage)[0];
+
+        leaderboard.push({
+          repUserId: rep.repUserId,
+          repName: rep.repName,
+          team,
+          compliancePercent: rep.compliancePercent,
+          kpisHitCount: rep.kpisHitCount,
+          totalKpisTracked: rep.totalKpisTracked,
+          biggestGapMetricLabel: worstMissed?.metricLabel ?? null,
+        });
+      }
+    }
+
+    leaderboard.sort((a, b) => {
+      if (b.compliancePercent !== a.compliancePercent) return b.compliancePercent - a.compliancePercent;
+      return a.repName.localeCompare(b.repName);
+    });
+
+    const topPerformer = leaderboard[0]
+      ? {
+          repUserId: leaderboard[0].repUserId,
+          repName: leaderboard[0].repName,
+          team: leaderboard[0].team,
+          compliancePercent: leaderboard[0].compliancePercent,
+        }
+      : undefined;
+
+    const mostAtRiskEntry = leaderboard.length ? leaderboard[leaderboard.length - 1] : undefined;
+    const mostAtRisk = mostAtRiskEntry
+      ? {
+          repUserId: mostAtRiskEntry.repUserId,
+          repName: mostAtRiskEntry.repName,
+          team: mostAtRiskEntry.team,
+          compliancePercent: mostAtRiskEntry.compliancePercent,
+          biggestGapMetricLabel: mostAtRiskEntry.biggestGapMetricLabel,
+        }
+      : undefined;
+
+    let weeklySummaryText: string | null = null;
+    if (
+      lastWeekStarting &&
+      acquisitionsSummaryEntries &&
+      dispositionsSummaryEntries &&
+      acquisitionsSummaryTargets &&
+      dispositionsSummaryTargets
+    ) {
+      const out = generateWeeklyKpiSummaryText({
+        weekStarting: lastWeekStarting,
+        acquisitions: { entries: acquisitionsSummaryEntries, targets: acquisitionsSummaryTargets },
+        dispositions: { entries: dispositionsSummaryEntries, targets: dispositionsSummaryTargets },
+      });
+      weeklySummaryText = [
+        out.acquisitionsRecap,
+        out.dispositionsRecap,
+        "",
+        out.teamTakeaway,
+        "",
+        ...out.stretchFocusByRep.map((r) => `- ${r.text}`),
+      ].join("\n");
+    }
+
+    const offersMetric = teamCards.acquisitions.metrics.find((m) => m.metricKey === "OFFERS_MADE");
+    const offersCompliance = offersMetric
+      ? {
+          hitLabel: offersMetric.hitLabel,
+          hitRatePercent: offersMetric.hitRatePercent,
+          hitReps: Number(offersMetric.hitLabel.split("/")[0] ?? 0),
+          totalReps: Number(offersMetric.hitLabel.split("/")[1] ?? 0),
+        }
+      : undefined;
+
+    const trendDeltaPctPoints = {
+      acquisitions: teamCards.acquisitions.overallCompliancePercent - teamCards.acquisitions.compliancePercentPrev,
+      dispositions: teamCards.dispositions.overallCompliancePercent - teamCards.dispositions.compliancePercentPrev,
+    };
+
+    return {
+      lastWeekStarting,
+      previousWeekStarting,
+      weeklySummaryText,
+      acquisitions: {
+        overallCompliancePercent: teamCards.acquisitions.overallCompliancePercent,
+        totalReps: teamCards.acquisitions.totalReps,
+        metrics: teamCards.acquisitions.metrics,
+      },
+      dispositions: {
+        overallCompliancePercent: teamCards.dispositions.overallCompliancePercent,
+        totalReps: teamCards.dispositions.totalReps,
+        metrics: teamCards.dispositions.metrics,
+      },
+      offersTierBreakdown,
+      offersCompliance,
+      trendDeltaPctPoints,
+      leaderboard: leaderboard.slice(0, 6).map((l) => ({
+        repUserId: l.repUserId,
+        repName: l.repName,
+        team: l.team,
+        compliancePercent: l.compliancePercent,
+        kpisHitCount: l.kpisHitCount,
+        totalKpisTracked: l.totalKpisTracked,
+      })),
+      topPerformer,
+      mostAtRisk,
+    };
+  })();
+
+  const [assignmentRevenueTrend, pointsTrend, weeklySnapshot, activity, teamSize, monthDealStats, kpiDashboard] = await Promise.all([
     getMonthlyDealRevenueSeries({ prisma, actor: dealActor, monthsBack: 6 }),
     getPointsTrendSeries({ prisma, actor, monthsBack: 6 }),
     getWeeklyKpiSnapshot(prisma, kpiActor),
@@ -437,6 +738,7 @@ export async function getDashboardOverview(prisma: PrismaClient, actor: { id: st
       return { active, inactive };
     })(),
     getCurrentMonthFundedDealStats(prisma, dealActor),
+    kpiDashboardPromise,
   ]);
 
   return {
@@ -448,6 +750,7 @@ export async function getDashboardOverview(prisma: PrismaClient, actor: { id: st
     weeklySnapshot,
     recentActivity: activity,
     teamSize,
+    kpiDashboard,
   };
 }
 

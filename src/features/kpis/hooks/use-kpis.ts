@@ -8,10 +8,12 @@ import {
   getKpiTrend,
   getWeekSummary,
   upsertKpiEntryApi,
+  bulkImportKpisApi,
 } from "@/features/kpis/services/placeholder/kpis.service";
 import { Team } from "@/types";
 import { useAuthz } from "@/lib/auth/authz-context";
 import type { UpsertKpiEntryInput } from "@/features/kpis/server/kpis.service";
+import type { KpiBulkImportInput } from "@/features/kpis/schemas/kpi-bulk-import.schemas";
 
 export function useKpiEntries(team: Team, weekStarting?: string) {
   const { status } = useAuthz();
@@ -81,6 +83,21 @@ export function useUpsertKpiEntry() {
   return useMutation({
     mutationFn: (input: UpsertKpiEntryInput) => upsertKpiEntryApi(input),
     onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ["kpi-entries"], exact: false });
+      qc.invalidateQueries({ queryKey: ["kpi-weeks"], exact: false });
+      qc.invalidateQueries({ queryKey: ["kpi-summary"], exact: false });
+      qc.invalidateQueries({ queryKey: ["kpi-trend"], exact: false });
+      qc.invalidateQueries({ queryKey: ["kpi-targets"], exact: false });
+      qc.invalidateQueries({ queryKey: ["kpi-history"], exact: false });
+    },
+  });
+}
+
+export function useBulkImportKpis() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: KpiBulkImportInput) => bulkImportKpisApi(payload),
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["kpi-entries"], exact: false });
       qc.invalidateQueries({ queryKey: ["kpi-weeks"], exact: false });
       qc.invalidateQueries({ queryKey: ["kpi-summary"], exact: false });
