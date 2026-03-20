@@ -111,7 +111,7 @@ export default function CommissionsPage() {
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <PageHeader
           title="Commissions"
-          subtitle="45-day rolling commission windows — 2026"
+          description="45-day rolling commission windows — 2026"
         />
         <div className="flex items-center gap-2">
           <CalendarDays className="h-4 w-4 text-muted-foreground" />
