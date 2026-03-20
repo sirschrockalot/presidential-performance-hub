@@ -551,7 +551,6 @@ export async function getDashboardOverview(prisma: PrismaClient, actor: { id: st
       );
 
       if (team === "acquisitions") {
-        offersTierBreakdown.totalReps = perRep.length;
         offersTierBreakdown.belowMinimum.totalReps = perRep.length;
         offersTierBreakdown.metMinimum.totalReps = perRep.length;
         offersTierBreakdown.hitTarget.totalReps = perRep.length;
@@ -573,7 +572,6 @@ export async function getDashboardOverview(prisma: PrismaClient, actor: { id: st
             targets,
           })
         );
-        offersTierBreakdown.prev.totalReps = perRepPrev.length;
         offersTierBreakdown.prev.belowMinimum.totalReps = perRepPrev.length;
         offersTierBreakdown.prev.metMinimum.totalReps = perRepPrev.length;
         offersTierBreakdown.prev.hitTarget.totalReps = perRepPrev.length;
