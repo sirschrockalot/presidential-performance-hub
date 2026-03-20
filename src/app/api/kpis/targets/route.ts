@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentUser } from "@/lib/auth/current-user";
@@ -8,6 +9,7 @@ import { kpiTeamQuerySchema, weekStartingSchema } from "@/features/kpis/schemas"
 import { listKpiTargetsForTeam, upsertKpiTargets } from "@/features/kpis/server/kpis.service";
 import type { KpiActor } from "@/features/kpis/server/kpi-scope";
 import { z } from "zod";
+import { CACHE_TAGS, revalidateKpiReads, revalidateKpiTargetsAndUsers } from "@/lib/cache/revalidation";
 
 export async function GET(req: Request) {
   const user = await getCurrentUser();
@@ -23,7 +25,11 @@ export async function GET(req: Request) {
   }
 
   const actor: KpiActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
-  const targets = await listKpiTargetsForTeam(prisma, actor, parsed.data.team);
+  const targets = await unstable_cache(
+    () => listKpiTargetsForTeam(prisma, actor, parsed.data.team),
+    ["kpis:targets", actor.id, actor.roleCode, actor.teamCode, parsed.data.team],
+    { tags: [CACHE_TAGS.kpiTargets], revalidate: 3600 }
+  )();
   return NextResponse.json({ targets });
 }
 
@@ -80,6 +86,8 @@ export async function POST(req: Request) {
       reportingPeriodStart: parsed.data.reportingPeriodStart ?? null,
       targets: parsed.data.targets,
     });
+    revalidateKpiTargetsAndUsers();
+    revalidateKpiReads();
     return NextResponse.json({ targets: updated });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to update KPI targets";

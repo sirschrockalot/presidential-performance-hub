@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getApiSessionUser } from "@/lib/auth/require-api-user";
 import { addDealNoteSchema } from "@/features/deals/schemas/deal.schemas";
 import { addDealNote } from "@/features/deals/server/deals.service";
+import { revalidateDealReads } from "@/lib/cache/revalidation";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -31,5 +32,6 @@ export async function POST(req: Request, { params }: RouteParams) {
   if (!deal) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  revalidateDealReads();
   return NextResponse.json({ deal });
 }

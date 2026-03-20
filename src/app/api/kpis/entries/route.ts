@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentUser } from "@/lib/auth/current-user";
@@ -6,6 +7,7 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { kpiEntriesQuerySchema } from "@/features/kpis/schemas";
 import { listKpiEntries } from "@/features/kpis/server/kpis.service";
 import type { KpiActor } from "@/features/kpis/server/kpi-scope";
+import { CACHE_TAGS } from "@/lib/cache/revalidation";
 
 export async function GET(req: Request) {
   const user = await getCurrentUser();
@@ -25,7 +27,11 @@ export async function GET(req: Request) {
   }
 
   const actor: KpiActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
-  const entries = await listKpiEntries(prisma, actor, parsed.data.team, parsed.data.weekStarting);
+  const entries = await unstable_cache(
+    () => listKpiEntries(prisma, actor, parsed.data.team, parsed.data.weekStarting),
+    ["kpis:entries", actor.id, actor.roleCode, actor.teamCode, parsed.data.team, parsed.data.weekStarting ?? "none"],
+    { tags: [CACHE_TAGS.kpis], revalidate: 120 }
+  )();
   return NextResponse.json({ entries });
 }
 

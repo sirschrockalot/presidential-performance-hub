@@ -5,6 +5,7 @@ import { getApiSessionUser } from "@/lib/auth/require-api-user";
 import { roleHasPermission } from "@/lib/auth/permissions";
 import { updateDealStatusSchema } from "@/features/deals/schemas/deal.schemas";
 import { updateDealStatus } from "@/features/deals/server/deals.service";
+import { revalidateDealReads } from "@/lib/cache/revalidation";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -35,5 +36,6 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   if (!deal) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  revalidateDealReads();
   return NextResponse.json({ deal });
 }

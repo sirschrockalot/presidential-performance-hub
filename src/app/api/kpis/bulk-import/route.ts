@@ -7,6 +7,7 @@ import { roleHasPermission } from "@/lib/auth/permissions";
 import { kpiBulkImportSchema } from "@/features/kpis/schemas/kpi-bulk-import.schemas";
 import { bulkImportKpis } from "@/features/kpis/server/kpi-bulk-import.service";
 import type { KpiActor } from "@/features/kpis/server/kpi-scope";
+import { revalidateKpiReads } from "@/lib/cache/revalidation";
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
@@ -41,6 +42,7 @@ export async function POST(req: Request) {
 
   try {
     const result = await bulkImportKpis(prisma, actor, parsed.data);
+    revalidateKpiReads();
     return NextResponse.json({ result });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to import KPI data";

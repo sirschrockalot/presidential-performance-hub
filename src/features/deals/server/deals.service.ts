@@ -8,11 +8,13 @@ import type { CreateDealInput, ListDealsQuery, UpdateDealInput, UpdateDealStatus
 import { dealWhereForScope, type DealActor } from "@/features/deals/server/deal-scope";
 import { writeAuditLog } from "@/lib/audit/audit-log";
 import { syncPointsForDealFundingTransition } from "@/features/points/server/points.engine";
+import { calculatePoints, calculateTcPoints } from "@/features/points/server/points-calculator";
 
 const dealListInclude = {
   acquisitionsRep: { select: { id: true, name: true } },
   dispoRep: { select: { id: true, name: true } },
   transactionCoordinator: { select: { id: true, name: true } },
+  pointEvents: { select: { points: true } },
 } as const;
 
 const dealDetailInclude = {
@@ -63,8 +65,11 @@ export type DealListRow = {
   contractPrice: number;
   assignmentPrice: number | null;
   assignmentFee: number | null;
+  margin: number | null;
   buyerEmdAmount: number | null;
   buyerEmdReceived: boolean;
+  potentialPointsEarned: number;
+  actualPointsEarned: number;
   titleCompany: string;
   inspectionEndDate: string | null;
   status: UiDealStatus;
@@ -78,6 +83,17 @@ export type DealListRow = {
 function mapDealListRow(
   deal: Prisma.DealGetPayload<{ include: typeof dealListInclude }>
 ): DealListRow {
+  const assignmentFeeNum = num(deal.assignmentFee);
+  const fallbackMargin = deal.assignmentPrice != null ? Number(deal.assignmentPrice) - Number(deal.contractPrice) : null;
+  const margin = assignmentFeeNum ?? fallbackMargin;
+
+  const repPoints = margin != null ? calculatePoints(margin) : 0;
+  const tcPoints = deal.transactionCoordinatorId ? calculateTcPoints() : 0;
+  const potentialPointsEarned =
+    repPoints * (deal.dispoRepId ? 2 : 1) + tcPoints;
+
+  const actualPointsEarned = deal.pointEvents.reduce((sum, pe) => sum + Number(pe.points), 0);
+
   return {
     id: deal.id,
     propertyAddress: deal.propertyAddress,
@@ -91,9 +107,12 @@ function mapDealListRow(
     closedFundedDate: dateOnly(deal.closedFundedDate),
     contractPrice: n(deal.contractPrice),
     assignmentPrice: num(deal.assignmentPrice),
-    assignmentFee: num(deal.assignmentFee),
+    assignmentFee: assignmentFeeNum,
+    margin,
     buyerEmdAmount: num(deal.buyerEmdAmount),
     buyerEmdReceived: deal.buyerEmdReceived,
+    potentialPointsEarned,
+    actualPointsEarned,
     titleCompany: deal.titleCompany,
     inspectionEndDate: dateOnly(deal.inspectionEndDate),
     status: DEAL_STATUS_TO_UI[deal.status] as UiDealStatus,

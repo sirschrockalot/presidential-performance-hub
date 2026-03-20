@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentUser } from "@/lib/auth/current-user";
@@ -6,6 +7,7 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { kpiEntriesQuerySchema } from "@/features/kpis/schemas";
 import { getKpiWeekSummary } from "@/features/kpis/server/kpis.service";
 import type { KpiActor } from "@/features/kpis/server/kpi-scope";
+import { CACHE_TAGS } from "@/lib/cache/revalidation";
 
 export async function GET(req: Request) {
   const user = await getCurrentUser();
@@ -26,7 +28,11 @@ export async function GET(req: Request) {
   }
 
   const actor: KpiActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
-  const summary = await getKpiWeekSummary(prisma, actor, parsed.data.team, parsed.data.weekStarting);
+  const summary = await unstable_cache(
+    () => getKpiWeekSummary(prisma, actor, parsed.data.team, parsed.data.weekStarting),
+    ["kpis:summary", actor.id, actor.roleCode, actor.teamCode, parsed.data.team, parsed.data.weekStarting],
+    { tags: [CACHE_TAGS.kpiSummary], revalidate: 120 }
+  )();
   return NextResponse.json({ summary });
 }
 

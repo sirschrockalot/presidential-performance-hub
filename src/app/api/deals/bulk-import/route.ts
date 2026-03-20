@@ -5,6 +5,7 @@ import { getApiSessionUser } from "@/lib/auth/require-api-user";
 import { roleHasPermission } from "@/lib/auth/permissions";
 import { dealBulkImportSchema } from "@/features/deals/schemas/deal-bulk-import.schemas";
 import { bulkImportDeals } from "@/features/deals/server/deal-bulk-import.service";
+import { revalidateDealReads } from "@/lib/cache/revalidation";
 
 export async function POST(req: Request) {
   const actor = await getApiSessionUser();
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
 
   try {
     const result = await bulkImportDeals(prisma, actor, parsed.data);
+    revalidateDealReads();
     return NextResponse.json({ result });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to import deals";

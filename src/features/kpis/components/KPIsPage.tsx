@@ -14,7 +14,6 @@ import {
   useKpiHistory,
   useKpiFormUsers,
   useUpsertKpiEntry,
-  useBulkImportKpis,
 } from '@/features/kpis/hooks/use-kpis';
 import { Team } from '@/types';
 import { Phone, Clock, FileText, TrendingUp, Plus } from 'lucide-react';
@@ -24,11 +23,8 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { LoadingState } from '@/components/shared/LoadingState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { cn } from "@/lib/utils";
 import type { KpiEntryWithRepDto, UpsertKpiEntryInput } from '@/features/kpis/server/kpis.service';
-import type { BulkImportKpisResult } from '@/features/kpis/server/kpi-bulk-import.service';
-import type { KpiBulkImportInput } from "@/features/kpis/schemas/kpi-bulk-import.schemas";
 import {
   Dialog,
   DialogContent,
@@ -266,8 +262,6 @@ export default function KPIsPage() {
   const [week, setWeek] = useState("2026-03-03");
   const [entryOpen, setEntryOpen] = useState(false);
   const [repUserIdForForm, setRepUserIdForForm] = useState<string>("");
-  const [bulkText, setBulkText] = useState<string>("");
-  const [bulkResult, setBulkResult] = useState<BulkImportKpisResult | null>(null);
 
   const allowedTeams = useMemo((): Team[] => {
     if (roleCode === "REP") {
@@ -326,7 +320,6 @@ export default function KPIsPage() {
 
   const { data: repUsers } = useKpiFormUsers(team);
   const { data: history } = useKpiHistory(team);
-  const bulkImportMutation = useBulkImportKpis();
 
   useEffect(() => {
     if (!weeks?.length) return;
@@ -568,79 +561,6 @@ export default function KPIsPage() {
           )}
         </div>
       </PageHeader>
-
-      {can("kpi:new_entry") && (
-        <div className="rounded-lg border bg-card p-4 space-y-3">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h3 className="text-sm font-semibold">Bulk JSON KPI Import</h3>
-              <p className="text-xs text-muted-foreground">
-                Paste payloads with `weeks[]`, `weekStarting` (YYYY-MM-DD Monday UTC), and `repName` metrics.
-              </p>
-            </div>
-          </div>
-
-          <Textarea
-            value={bulkText}
-            onChange={(e) => {
-              setBulkText(e.target.value);
-              setBulkResult(null);
-            }}
-            placeholder={`{\n  "weeks": [\n    {\n      "weekStarting": "2026-03-03",\n      "acquisitions": [\n        {\n          "repName": "Melina",\n          "dials": 175,\n          "talkHours": 14.6,\n          "offersMade": 35,\n          "contractsSigned": 6\n        }\n      ],\n      "dispositions": [\n        {\n          "repName": "Derek",\n          "dials": 318,\n          "talkHours": 2.5\n        }\n      ]\n    }\n  ]\n}`}
-            className="min-h-[180px]"
-          />
-
-          <div className="flex items-center justify-between gap-3">
-            <Button
-              size="sm"
-              onClick={async () => {
-                if (!bulkText.trim()) return;
-                try {
-                  const parsed = JSON.parse(bulkText) as KpiBulkImportInput;
-                  const res = await bulkImportMutation.mutateAsync(parsed);
-                  setBulkResult(res);
-                  if (res.errors.length === 0) {
-                    toast.success(`Imported KPI data (${res.imported} created, ${res.updated} updated).`);
-                    setBulkText("");
-                  } else {
-                    toast.error(`Imported with ${res.errors.length} issue(s): ${res.imported} created, ${res.updated} updated.`);
-                  }
-                } catch (e) {
-                  const msg = e instanceof Error ? e.message : "Failed to import KPI data";
-                  toast.error(msg);
-                }
-              }}
-              disabled={bulkImportMutation.isPending || !bulkText.trim()}
-            >
-              {bulkImportMutation.isPending ? "Importing..." : "Import JSON"}
-            </Button>
-
-            {bulkResult && (
-              <div className="text-xs text-muted-foreground">
-                Created: <span className="font-medium">{bulkResult.imported}</span>, Updated:{" "}
-                <span className="font-medium">{bulkResult.updated}</span>, Skipped:{" "}
-                <span className="font-medium">{bulkResult.skipped}</span>
-              </div>
-            )}
-          </div>
-
-          {bulkResult?.errors?.length ? (
-            <div className="space-y-1">
-              <p className="text-xs font-medium">Issues</p>
-              <div className="text-xs text-muted-foreground max-h-28 overflow-auto rounded border p-2">
-                {bulkResult.errors.map((err, idx) => (
-                  <div key={`${err.code}-${idx}`} className="mb-1">
-                    <span className="font-medium">{err.code}</span>
-                    {err.weekStarting ? <span> · week {err.weekStarting}</span> : null}
-                    {err.repName ? <span> · rep {err.repName}</span> : null}
-                    <div className="break-words">{err.message}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      )}
 
       <Tabs value={team} onValueChange={(v) => setTeam(v as Team)} className="space-y-3">
         <div>

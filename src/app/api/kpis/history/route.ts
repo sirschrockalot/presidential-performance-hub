@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentUser } from "@/lib/auth/current-user";
@@ -6,6 +7,7 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { kpiHistoryQuerySchema } from "@/features/kpis/schemas";
 import { listKpiHistory } from "@/features/kpis/server/kpis.service";
 import type { KpiActor } from "@/features/kpis/server/kpi-scope";
+import { CACHE_TAGS } from "@/lib/cache/revalidation";
 
 export async function GET(req: Request) {
   const user = await getCurrentUser();
@@ -25,7 +27,11 @@ export async function GET(req: Request) {
   }
 
   const actor: KpiActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
-  const history = await listKpiHistory(prisma, actor, parsed.data.team, parsed.data.repUserId);
+  const history = await unstable_cache(
+    () => listKpiHistory(prisma, actor, parsed.data.team, parsed.data.repUserId),
+    ["kpis:history", actor.id, actor.roleCode, actor.teamCode, parsed.data.team, parsed.data.repUserId ?? "none"],
+    { tags: [CACHE_TAGS.kpiHistory], revalidate: 300 }
+  )();
   return NextResponse.json({ history });
 }
 

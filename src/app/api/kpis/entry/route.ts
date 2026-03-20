@@ -8,6 +8,7 @@ import { kpiUpsertSchema } from "@/features/kpis/schemas";
 import { upsertKpiEntry } from "@/features/kpis/server/kpis.service";
 import type { UpsertKpiEntryInput } from "@/features/kpis/server/kpis.service";
 import type { KpiActor } from "@/features/kpis/server/kpi-scope";
+import { revalidateKpiReads } from "@/lib/cache/revalidation";
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
   const actor: KpiActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
   try {
     const entry = await upsertKpiEntry(prisma, actor, parsed.data as UpsertKpiEntryInput);
+    revalidateKpiReads();
     return NextResponse.json({ entry });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to upsert KPI entry";
