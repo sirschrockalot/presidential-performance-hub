@@ -1,11 +1,13 @@
 import type { DealStatus } from "@/types";
 import type { CreateDealInput, UpdateDealInput, UpdateDealStatusInput } from "@/features/deals/schemas/deal.schemas";
+import type { DealBulkImportInput } from "@/features/deals/schemas/deal-bulk-import.schemas";
 import type {
   AssignmentUserDto,
   DealDetailDto,
   DealListRow,
   DealMetricsDto,
 } from "@/features/deals/server/deals.service";
+import type { BulkImportDealsResult } from "@/features/deals/server/deal-bulk-import.service";
 
 export type { DealDetailDto, DealListRow, DealMetricsDto, AssignmentUserDto };
 
@@ -110,4 +112,15 @@ export async function addDealNoteApi(id: string, body: string): Promise<DealDeta
   });
   const data = await parseJson<{ deal: DealDetailDto }>(res);
   return data.deal;
+}
+
+export async function bulkImportDealsApi(payload: DealBulkImportInput): Promise<BulkImportDealsResult> {
+  const res = await fetch("/api/deals/bulk-import", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await parseJson<{ result: BulkImportDealsResult }>(res);
+  return data.result;
 }

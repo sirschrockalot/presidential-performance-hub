@@ -8,10 +8,12 @@ import {
   updateDealApi,
   updateDealStatusApi,
   addDealNoteApi,
+  bulkImportDealsApi,
   type DealListFilters,
 } from "@/features/deals/services/deals.service";
 import { useAuthz } from "@/lib/auth/authz-context";
 import type { CreateDealInput, UpdateDealInput, UpdateDealStatusInput } from "@/features/deals/schemas/deal.schemas";
+import type { DealBulkImportInput } from "@/features/deals/schemas/deal-bulk-import.schemas";
 
 export function useDeals(filters?: DealListFilters) {
   const { dataScope, status } = useAuthz();
@@ -90,6 +92,18 @@ export function useAddDealNote(id: string) {
     mutationFn: (body: string) => addDealNoteApi(id, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["deal", id] });
+    },
+  });
+}
+
+export function useBulkImportDeals() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: DealBulkImportInput) => bulkImportDealsApi(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["deals"], exact: false });
+      qc.invalidateQueries({ queryKey: ["deal"], exact: false });
+      qc.invalidateQueries({ queryKey: ["deal-metrics"], exact: false });
     },
   });
 }

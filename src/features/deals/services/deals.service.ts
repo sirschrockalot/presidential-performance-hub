@@ -17,5 +17,6 @@ export {
   updateDealApi,
   updateDealStatusApi,
   addDealNoteApi,
+  bulkImportDealsApi,
   type DealListFilters,
 } from "@/features/deals/api/deals-client";

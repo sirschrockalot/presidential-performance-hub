@@ -8,10 +8,13 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTable } from "@/components/shared/DataTable";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useDeals } from "@/features/deals/hooks/use-deals";
+import { useDeals, useBulkImportDeals } from "@/features/deals/hooks/use-deals";
 import type { DealWithReps } from "@/features/deals/services/deals.service";
+import type { DealBulkImportInput } from "@/features/deals/schemas/deal-bulk-import.schemas";
+import type { BulkImportDealsResult } from "@/features/deals/server/deal-bulk-import.service";
 import { DEAL_STATUS_CONFIG, type DealStatus } from "@/types";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Plus, Filter, ArrowUpDown, AlertTriangle } from "lucide-react";
@@ -24,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { useAuthz } from "@/lib/auth/authz-context";
 import { DealCreateDialog } from "@/features/deals/components/DealCreateDialog";
+import { toast } from "sonner";
 
 export default function DealsPage() {
   const [search, setSearch] = useState("");
@@ -33,8 +37,11 @@ export default function DealsPage() {
   );
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [createOpen, setCreateOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkResult, setBulkResult] = useState<BulkImportDealsResult | null>(null);
   const router = useRouter();
   const { can } = useAuthz();
+  const bulkImportMutation = useBulkImportDeals();
 
   const debouncedSearch = search;
 
@@ -122,6 +129,78 @@ export default function DealsPage() {
       </PageHeader>
 
       {can("deal:create") && <DealCreateDialog open={createOpen} onOpenChange={setCreateOpen} />}
+
+      {can("deal:create") && (
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">Import Deals JSON</h3>
+            <p className="text-xs text-muted-foreground">
+              Paste a JSON payload with a `deals` array. Existing deals are matched by property, seller, and contract
+              date.
+            </p>
+          </div>
+
+          <Textarea
+            value={bulkText}
+            onChange={(e) => {
+              setBulkText(e.target.value);
+              setBulkResult(null);
+            }}
+            placeholder={`{\n  "deals": [\n    {\n      "externalRef": "12345",\n      "propertyAddress": "105 S Dandy St",\n      "city": "Saint Marys",\n      "state": "GA",\n      "zipCode": "31558",\n      "sellerName": "John Seller",\n      "acquisitionRep": "Melina",\n      "status": "Under Contract",\n      "contractDate": "2026-03-20",\n      "purchasePrice": 85000,\n      "salePrice": 100000,\n      "emdAmount": 2500,\n      "notes": "Imported from screenshot"\n    }\n  ]\n}`}
+            className="min-h-[180px]"
+          />
+
+          <div className="flex items-center justify-between gap-3">
+            <Button
+              size="sm"
+              onClick={async () => {
+                if (!bulkText.trim()) return;
+                try {
+                  const parsed = JSON.parse(bulkText) as DealBulkImportInput;
+                  const res = await bulkImportMutation.mutateAsync(parsed);
+                  setBulkResult(res);
+                  if (res.errors.length === 0) {
+                    toast.success(`Imported deals (${res.imported} created, ${res.updated} updated).`);
+                    setBulkText("");
+                  } else {
+                    toast.error(`Imported with ${res.errors.length} issue(s).`);
+                  }
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : "Failed to import deals";
+                  toast.error(msg);
+                }
+              }}
+              disabled={bulkImportMutation.isPending || !bulkText.trim()}
+            >
+              {bulkImportMutation.isPending ? "Importing..." : "Import JSON"}
+            </Button>
+
+            {bulkResult && (
+              <div className="text-xs text-muted-foreground">
+                Created: <span className="font-medium">{bulkResult.imported}</span>, Updated:{" "}
+                <span className="font-medium">{bulkResult.updated}</span>, Skipped:{" "}
+                <span className="font-medium">{bulkResult.skipped}</span>
+              </div>
+            )}
+          </div>
+
+          {bulkResult?.errors?.length ? (
+            <div className="space-y-1">
+              <p className="text-xs font-medium">Issues</p>
+              <div className="text-xs text-muted-foreground max-h-28 overflow-auto rounded border p-2">
+                {bulkResult.errors.map((err, idx) => (
+                  <div key={`${err.code}-${idx}`} className="mb-1">
+                    <span className="font-medium">{err.code}</span>
+                    <span> · row {err.rowIndex + 1}</span>
+                    {err.externalRef ? <span> · ref {err.externalRef}</span> : null}
+                    <div className="break-words">{err.message}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       <div className="flex flex-col lg:flex-row gap-3 lg:items-end">
         <div className="relative flex-1 max-w-md">
