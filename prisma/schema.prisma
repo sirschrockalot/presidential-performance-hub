@@ -115,6 +115,8 @@ model User {
   avatarUrl String?
   /// bcrypt hash for Credentials provider (null = invite-only / SSO later)
   passwordHash String?
+  /// UI preferences (notifications, theme, etc.) — JSON blob
+  preferences Json?
   /// Bridges seeded users to legacy mock fixture ids (e.g. "u5") until API reads DB only
   mockScopeId  String? @unique
   joinedAt  DateTime @default(now())
@@ -144,6 +146,13 @@ model User {
   dealStatusChanges  DealStatusHistory[]
   dealNotes          DealNote[]
   auditLogs          AuditLog[]       @relation("AuditLogActor")
+}
+
+/// Single-row org-wide settings edited from the Settings UI (singleton id).
+model AppSettings {
+  id        String   @id @default("singleton")
+  payload   Json     @default("{}")
+  updatedAt DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------

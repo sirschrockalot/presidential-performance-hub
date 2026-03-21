@@ -78,7 +78,10 @@ async function main(): Promise<void> {
       // Order follows FK constraints (same spirit as prisma/seed/truncate.ts).
       // Role / Team: intentionally not cleared — required for a valid User row.
 
-      let r = await tx.auditLog.deleteMany({});
+      let r = await tx.appSettings.deleteMany({});
+      record("AppSettings", r.count);
+
+      r = await tx.auditLog.deleteMany({});
       record("AuditLog", r.count);
 
       r = await tx.pointEvent.deleteMany({});

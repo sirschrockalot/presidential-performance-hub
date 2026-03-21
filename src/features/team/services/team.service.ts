@@ -4,6 +4,7 @@
 import type { UserRole } from "@/types";
 import type { TeamMemberDto } from "@/features/team/types/team.types";
 import type { CreateTeamMemberInput, AdminPatchTeamUserInput } from "@/features/team/schemas/team.schema";
+import type { AdminSetUserPasswordInput } from "@/features/auth/schemas/password.schema";
 import type { DataScope } from "@/lib/auth/data-scope";
 
 export type { TeamMemberDto, TeamMemberDto as TeamMember } from "@/features/team/types/team.types";
@@ -57,6 +58,16 @@ export async function patchTeamUserApi(id: string, input: AdminPatchTeamUserInpu
   });
   const data = await parseJson<{ member: TeamMemberDto }>(res);
   return data.member;
+}
+
+export async function setTeamUserPasswordApi(id: string, input: AdminSetUserPasswordInput): Promise<void> {
+  const res = await fetch(`/api/team/users/${encodeURIComponent(id)}/password`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  await parseJson<{ ok: boolean }>(res);
 }
 
 export function getRoleLabel(role: UserRole): string {

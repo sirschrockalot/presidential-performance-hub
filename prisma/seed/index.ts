@@ -26,6 +26,13 @@ async function main(): Promise<void> {
   await seedRolesAndTeams(prisma);
   console.info("  ✓ Roles & teams");
 
+  await prisma.appSettings.upsert({
+    where: { id: "singleton" },
+    create: { id: "singleton", payload: {} },
+    update: {},
+  });
+  console.info("  ✓ App settings row");
+
   const seedPassword = process.env.SEED_USER_PASSWORD ?? "LocalDev-ChangeMe!";
   const passwordHash = await bcrypt.hash(seedPassword, 12);
   await seedUsers(prisma, passwordHash);

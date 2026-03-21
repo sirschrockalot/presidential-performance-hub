@@ -17,12 +17,16 @@ export const dispositionsWeeklyTargets = [
 ];
 
 export const notificationPreferences = [
-  { label: "Deal status changes", desc: "Notify when a deal moves to a new stage" },
-  { label: "Draw requests", desc: "Notify admin of new draw requests" },
-  { label: "KPI deadline reminders", desc: "Remind reps to submit weekly KPIs" },
-  { label: "Points awarded", desc: "Notify reps when points are earned" },
-  { label: "Deal funded", desc: "Notify team when a deal closes" },
-];
+  {
+    key: "deal_status_changes",
+    label: "Deal status changes",
+    desc: "Notify when a deal moves to a new stage",
+  },
+  { key: "draw_requests", label: "Draw requests", desc: "Notify admin of new draw requests" },
+  { key: "kpi_deadline_reminders", label: "KPI deadline reminders", desc: "Remind reps to submit weekly KPIs" },
+  { key: "points_awarded", label: "Points awarded", desc: "Notify reps when points are earned" },
+  { key: "deal_funded", label: "Deal funded", desc: "Notify team when a deal closes" },
+] as const;
 
 export const integrations = [
   { name: "Aircall", desc: "Auto-sync dials and talk time from Aircall", connected: false },

@@ -76,6 +76,11 @@ export default function LoginPage() {
           <Button type="submit" className="w-full" disabled={pending}>
             {pending ? "Signing in…" : "Sign in"}
           </Button>
+          <p className="text-center text-sm text-muted-foreground">
+            <a href="/forgot-password" className="text-primary underline-offset-4 hover:underline">
+              Forgot password?
+            </a>
+          </p>
         </form>
       </div>
     </div>

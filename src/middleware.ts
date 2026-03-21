@@ -44,8 +44,9 @@ export async function middleware(req: NextRequest) {
 
   const loggedIn = !!token;
   const isLogin = pathname.startsWith("/login");
+  const isForgotPassword = pathname.startsWith("/forgot-password");
 
-  if (isLogin) {
+  if (isLogin || isForgotPassword) {
     if (loggedIn) return NextResponse.redirect(new URL("/", req.url));
     return NextResponse.next();
   }

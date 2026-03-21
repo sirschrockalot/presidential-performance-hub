@@ -18,7 +18,7 @@ import {
   useCreateTeamMember,
   usePatchTeamUser,
 } from "@/features/team/hooks/use-team";
-import { getRoleLabel } from "@/features/team/services/team.service";
+import { getRoleLabel, setTeamUserPasswordApi } from "@/features/team/services/team.service";
 import type { TeamMemberDto } from "@/features/team/types/team.types";
 import {
   createTeamMemberSchema,
@@ -26,6 +26,10 @@ import {
   type CreateTeamMemberInput,
   type EditTeamMemberFormValues,
 } from "@/features/team/schemas/team.schema";
+import {
+  adminSetUserPasswordSchema,
+  type AdminSetUserPasswordInput,
+} from "@/features/auth/schemas/password.schema";
 import { USER_ROLE_CODE_FROM_UI, TEAM_CODE_FROM_UI } from "@/domain/prisma-enums";
 
 import { Button } from "@/components/ui/button";
@@ -122,6 +126,12 @@ export default function TeamPage() {
     },
   });
 
+  const adminPasswordForm = useForm<AdminSetUserPasswordInput>({
+    resolver: zodResolver(adminSetUserPasswordSchema),
+    defaultValues: { newPassword: "", confirmNewPassword: "" },
+  });
+  const [adminPasswordPending, setAdminPasswordPending] = useState(false);
+
   useEffect(() => {
     if (editOpen && editTarget) {
       editForm.reset({
@@ -132,6 +142,12 @@ export default function TeamPage() {
       });
     }
   }, [editOpen, editTarget, editForm]);
+
+  useEffect(() => {
+    if (editOpen) {
+      adminPasswordForm.reset({ newPassword: "", confirmNewPassword: "" });
+    }
+  }, [editOpen, adminPasswordForm]);
 
   const toggleUserActive = useCallback(
     async (targetUserId: string, nextActive: boolean) => {
@@ -194,6 +210,20 @@ export default function TeamPage() {
       setEditTarget(null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to update member");
+    }
+  });
+
+  const onAdminPasswordSubmit = adminPasswordForm.handleSubmit(async (values) => {
+    if (!editTarget) return;
+    setAdminPasswordPending(true);
+    try {
+      await setTeamUserPasswordApi(editTarget.id, values);
+      toast.success("Password updated for this member");
+      adminPasswordForm.reset({ newPassword: "", confirmNewPassword: "" });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to set password");
+    } finally {
+      setAdminPasswordPending(false);
     }
   });
 
@@ -699,6 +729,59 @@ export default function TeamPage() {
               </Button>
             </form>
           </Form>
+
+          {isAdmin && (
+            <div className="mt-8 pt-6 border-t space-y-4">
+              <h3 className="text-sm font-semibold">Set password</h3>
+              <p className="text-xs text-muted-foreground">
+                Set a new sign-in password for this user. They can change it later in Settings → Security.
+              </p>
+              <Form {...adminPasswordForm}>
+                <form onSubmit={onAdminPasswordSubmit} className="space-y-4">
+                  <FormField
+                    control={adminPasswordForm.control}
+                    name="newPassword"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>New password</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="password"
+                            autoComplete="new-password"
+                            disabled={adminPasswordPending}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={adminPasswordForm.control}
+                    name="confirmNewPassword"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Confirm new password</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="password"
+                            autoComplete="new-password"
+                            disabled={adminPasswordPending}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Button type="submit" variant="secondary" className="w-full" disabled={adminPasswordPending}>
+                    {adminPasswordPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    Update password
+                  </Button>
+                </form>
+              </Form>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
     </div>

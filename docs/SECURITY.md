@@ -9,6 +9,16 @@ Short checklist for API and server changes. Full enforcement is layered (Zod, se
 - **Permissions:** use `requirePermissionOr403` / `guard*WithPermission` — avoid ad-hoc role string checks in routes.
 - **Do not** import `getCurrentUser` / `getApiSessionUser` directly in route files (except `api/me/route.ts`, which may call `getCurrentUser` after `guardSessionActor` for full session payload). `npm run test` includes `src/test/api-routes-guard-audit.test.ts`, which fails if a protected route skips the guard module or uses disallowed imports.
 
+## App settings APIs
+
+- `GET/PATCH /api/settings/app` — org-wide JSON settings (`AppSettings` singleton). GET: any signed-in user. PATCH: `settings:admin_sections` (ADMIN).
+- `GET/PATCH /api/settings/me` — current user `User.preferences` (theme, notification toggles). Authenticated session only.
+
+## Passwords
+
+- **Self-service:** `POST /api/me/password` — `guardSessionActor`, validates current password, bcrypt hash (same rounds as seed). Audit: `user.password_change`.
+- **Admin reset:** `POST /api/team/users/[id]/password` — `guardSessionActorWithTeamAndPermission("settings:admin_sections")` (ADMIN-only permission) plus service check `actor.roleCode === "ADMIN"`. Audit: `user.password_reset`. Never log or audit plaintext passwords.
+
 ## Data and assignments
 
 - **Never trust** client-supplied user IDs for deal assignments, role changes, or cross-user reads. Validation lives in services (e.g. `deal-assignment-invariants.ts`, `team-role-invariants.ts`, points summary checks in `points.queries.ts`).

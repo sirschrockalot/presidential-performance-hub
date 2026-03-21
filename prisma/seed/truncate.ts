@@ -6,6 +6,7 @@ import type { PrismaClient } from "@prisma/client";
  */
 export async function truncateAppTables(prisma: PrismaClient): Promise<void> {
   await prisma.$transaction([
+    prisma.appSettings.deleteMany(),
     prisma.auditLog.deleteMany(),
     prisma.pointEvent.deleteMany(),
     prisma.pointAdjustment.deleteMany(),
