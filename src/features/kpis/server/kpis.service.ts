@@ -1,4 +1,4 @@
-import type { PrismaClient, Prisma } from "@prisma/client";
+import type { PrismaClient, Prisma, TeamCode, UserRoleCode } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 
 import type { Team } from "@/types";
@@ -8,6 +8,12 @@ import type { KpiMetricKey } from "@/features/kpis/utils/kpi-metrics";
 import type { KpiActor } from "@/features/kpis/server/kpi-scope";
 import { canMutateKpiEntries, kpiEntryUserWhereForScope, uiTeamToPrismaTeamCode } from "@/features/kpis/server/kpi-scope";
 import { writeAuditLog } from "@/lib/audit/audit-log";
+
+function allowedKpiSubmitterRolesForTeam(teamCode: TeamCode): UserRoleCode[] {
+  if (teamCode === "ACQUISITIONS") return ["REP", "ACQUISITIONS_MANAGER"];
+  if (teamCode === "DISPOSITIONS") return ["REP", "DISPOSITIONS_MANAGER"];
+  return [];
+}
 
 function dateOnlyToIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -396,13 +402,13 @@ export async function listKpiFormUsers(
 
   if (actor.roleCode === "REP") return [{ id: actor.id, name: "You" }];
 
-  const repRole = await prisma.role.findUnique({ where: { code: "REP" } });
-  if (!repRole) return [];
+  const allowedRoleCodes = allowedKpiSubmitterRolesForTeam(requestedTeamCode);
 
   const users = await prisma.user.findMany({
     where: {
-      roleId: repRole.id,
+      active: true,
       team: { code: requestedTeamCode },
+      role: { code: { in: allowedRoleCodes } },
     },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
@@ -459,13 +465,15 @@ export async function upsertKpiEntry(
     where: { id: input.repUserId },
     select: {
       id: true,
+      active: true,
       name: true,
       role: { select: { code: true } },
       team: { select: { code: true } },
       teamId: true,
     },
   });
-  if (!rep || rep.role.code !== "REP" || rep.team.code !== requestedTeamCode) {
+  const allowedRoleCodes = allowedKpiSubmitterRolesForTeam(requestedTeamCode);
+  if (!rep || !rep.active || !allowedRoleCodes.includes(rep.role.code) || rep.team.code !== requestedTeamCode) {
     throw new Error("Invalid rep for team");
   }
 

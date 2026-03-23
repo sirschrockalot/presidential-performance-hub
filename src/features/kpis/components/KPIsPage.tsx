@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion } from "motion/react";
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -281,6 +281,11 @@ export default function KPIsPage() {
   const [entryOpen, setEntryOpen] = useState(false);
   const [repUserIdForForm, setRepUserIdForForm] = useState<string>("");
 
+  const openEntryEditorForRep = useCallback((repUserId: string) => {
+    setRepUserIdForForm(repUserId);
+    setEntryOpen(true);
+  }, []);
+
   const allowedTeams = useMemo((): Team[] => {
     if (roleCode === "REP") {
       if (user?.teamCode === "ACQUISITIONS") return ["acquisitions"];
@@ -295,7 +300,7 @@ export default function KPIsPage() {
     }
   }, [allowedTeams, team]);
 
-  const { data: bundle, isPending: bundlePending } = useKpiPageBundle(team, week);
+  const { data: bundle, isPending: bundlePending, isError: bundleError, error: bundleErrorValue } = useKpiPageBundle(team, week);
 
   const weeks = bundle?.weeks ?? [];
 
@@ -558,7 +563,13 @@ export default function KPIsPage() {
                     Enter your KPI metrics for the current week. All fields are required.
                   </DialogDescription>
                 </DialogHeader>
-                {repUsers && repUsers.length > 0 ? (
+                {bundlePending ? (
+                  <div className="py-10 text-center text-muted-foreground">Loading reps…</div>
+                ) : bundleError ? (
+                  <div className="py-6 text-center text-sm text-destructive">
+                    {bundleErrorValue instanceof Error ? bundleErrorValue.message : "Failed to load reps"}
+                  </div>
+                ) : repUsers && repUsers.length > 0 ? (
                   <KpiEntryForm
                     team={team}
                     weekStarting={week}
@@ -569,7 +580,9 @@ export default function KPIsPage() {
                     onClose={() => setEntryOpen(false)}
                   />
                 ) : (
-                  <div className="py-10 text-center text-muted-foreground">Loading reps…</div>
+                  <div className="py-6 text-center text-muted-foreground">
+                    No reps available for this team.
+                  </div>
                 )}
               </DialogContent>
             </Dialog>
@@ -670,14 +683,27 @@ export default function KPIsPage() {
                     currentTeamLeaders.atRiskUserId === entry.userId ? "border-destructive/50 ring-1 ring-destructive/20" : ""
                   )}
                 >
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="flex items-center justify-center h-9 w-9 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                      {entry.repName.split(' ').map((n) => n[0]).join('')}
+                  <div className="flex items-start justify-between gap-3 mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-center h-9 w-9 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                        {entry.repName.split(' ').map((n) => n[0]).join('')}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold">{entry.repName}</p>
+                        <p className="text-xs text-muted-foreground capitalize">{team}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-semibold">{entry.repName}</p>
-                      <p className="text-xs text-muted-foreground capitalize">{team}</p>
-                    </div>
+                    {can("kpi:new_entry") && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-2.5 text-xs shrink-0"
+                        onClick={() => openEntryEditorForRep(entry.userId)}
+                      >
+                        Edit weekly entry
+                      </Button>
+                    )}
                   </div>
 
                   {(() => {

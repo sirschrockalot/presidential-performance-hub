@@ -24,7 +24,7 @@ export async function GET(req: Request) {
   const actor: KpiActor = { id: user.id, roleCode: user.roleCode, teamCode: user.teamCode };
   const users = await unstable_cache(
     () => listKpiFormUsers(prisma, actor, parsed.data.team),
-    ["kpis:form-users", actor.id, actor.roleCode, actor.teamCode, parsed.data.team],
+    ["kpis:form-users:v2", actor.id, actor.roleCode, actor.teamCode, parsed.data.team],
     { tags: [CACHE_TAGS.kpiFormUsers], revalidate: 3600 }
   )();
   return NextResponse.json({ users });

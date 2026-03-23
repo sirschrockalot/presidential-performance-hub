@@ -112,7 +112,7 @@ export async function getKpiPageBundle(
     )(),
     unstable_cache(
       () => listKpiFormUsers(prisma, actor, team),
-      ["kpis:form-users", actor.id, actor.roleCode, actor.teamCode, team],
+      ["kpis:form-users:v2", actor.id, actor.roleCode, actor.teamCode, team],
       { tags: [CACHE_TAGS.kpiFormUsers], revalidate: 3600 }
     )(),
   ]);
